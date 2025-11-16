@@ -28,7 +28,7 @@ const { tmpdir } = require('os')
 const Crypto = require('crypto')
 const path = require('path')
 
-const ownerNumber = ['94771098429']
+const ownerNumber = ['94754871798']
 
 //===================SESSION-AUTH============================
 if (!fs.existsSync(__dirname + '/auth_info_baileys/creds.json')) {
@@ -38,7 +38,7 @@ const filer = File.fromURL(`https://mega.nz/file/${sessdata}`)
 filer.download((err, data) => {
 if(err) throw err
 fs.writeFile(__dirname + '/auth_info_baileys/creds.json', data, () => {
-console.log("Session downloaded ✅")
+console.log("𝚂𝚎𝚜𝚜𝚒𝚘𝚗 𝙳𝚘𝚠𝚗𝚕𝚘𝚊𝚍 ✅")
 })})}
 
 const express = require("express");
@@ -57,7 +57,7 @@ const config = await readEnv();
 const prefix = ('.')
 //=================================
         
-console.log("ᴄᴏɴɴᴇᴄᴛɪɴɢ Queen_Ahinsa-MD ʙᴏᴛ 🧬...");
+console.log("𝙸𝚗𝚓𝚎𝚌𝚝𝚒𝚗𝚐 𝚉𝚘𝚖𝚋𝚒𝚎 𝚅𝚒𝚛𝚞𝚜𝚎 💉...");
 const { state, saveCreds } = await useMultiFileAuthState(__dirname + '/auth_info_baileys/')
 var { version } = await fetchLatestBaileysVersion()
 
@@ -77,27 +77,32 @@ if (lastDisconnect.error.output.statusCode !== DisconnectReason.loggedOut) {
 connectToWA()
 }
 } else if (connection === 'open') {
-console.log('😼 ɪɴsᴛᴀʟʟɪɴɢ ᴘʟᴜɢɪɴs ғɪʟᴇs ᴘʟᴢ ᴡᴀɪᴛ 🔌... ')
+console.log('𝙸𝚗𝚓𝚎𝚌𝚝𝚒𝚗𝚐 𝚉𝚘𝚖𝚋𝚒𝚎 𝚅𝚒𝚛𝚞𝚜𝚎 𝙿𝚕𝚞𝚐𝚒𝚗𝚜 🔌... ')
 const path = require('path');
 fs.readdirSync("./plugins/").forEach((plugin) => {
 if (path.extname(plugin).toLowerCase() == ".js") {
 require("./plugins/" + plugin);
 }
 });
-console.log('ᴘʟᴜɢɪɴs ɪɴsᴛᴀʟʟᴇᴅ sᴜᴄᴄᴇssғᴜʟʏ 🔌✅')
-console.log('QUEEN_AHINSA-MD ᴄᴏɴɴᴇᴄᴛᴇᴅ ᴛᴏ ᴡʜᴀᴛsᴀᴘᴘ ✅')
+console.log('𝙸𝚗𝚓𝚎𝚌𝚝𝚎𝚍 𝚉𝚘𝚖𝚋𝚒𝚎 𝚅𝚒𝚛𝚞𝚜𝚎 𝙿𝚕𝚞𝚐𝚒𝚗𝚜 ✅')
+console.log('𝚉𝚘𝚖𝚋𝚒𝚎 𝙸𝚗𝚓𝚎𝚌𝚝𝚎𝚍 𝚆𝚑𝚊𝚝𝚜𝚊𝚙𝚙 𝙽𝚘 𝙱𝚘𝚍𝚍𝚢 ✅')
 
-let up = `> *➺Queen_Ahinsa-MD ᴄᴏɴɴᴇᴄᴛᴇᴅ sᴜᴄᴄᴇssғᴜʟʏ ᴛʏᴘᴇ .ᴍᴇɴᴜ ᴛᴏ ᴄᴏᴍᴍᴀɴᴅ ʟɪsᴛ ᴄʀᴇᴀᴛᴇᴅ ʙʏ DILISHA Gimshan ✅*
+let up = `
 
-╭⊱✫🔮 QUEEN_AHINSA-MD 🔮✫⊱╮
-│✫➠ - *📂REPOSITORY NAME:* Queen_Ahinsa-MD 
-│✫➠ - *📃DESCRIPTION:* ❁ᴡᴏʀʟᴅ ʙᴇsᴛ ᴡʜᴀᴛsᴀᴘᴘ ʙᴏᴛ❁
-│✫➠ - *🛡️OWNER:* DILISHA Gimshan 
-│✫➠ - *🌐 URL:* https://github.com/Koyeb-LK/Queen_Ahinsa-MD 
-╰━━━━━━━━━━━━━━━━━╯
+*𝙷𝚎𝚕𝚕𝚘𝚠 𝙳𝚎𝚊𝚛 ${ownerNumber}*
 
-*YOUR BOT ACTIVE NOW ENJOY♥️🪄*\n\nPREFIX: ${prefix}`;
-conn.sendMessage(ownerNumber + "@s.whatsapp.net", { image: { url: `https://i.ibb.co/SR76mBh/Pu3-ZYHBS5139.jpg` }, caption: up })
+*✯ 𝙱𝙾𝚃 𝙽𝙰𝙼𝙴 ✯* - 𝚀𝚞𝚎𝚎𝚗_𝙰𝚑𝚒𝚗𝚜𝚊-𝙼𝙳
+*✯ 𝙱𝙾𝚃 𝚂𝙴𝚂𝚂𝙸𝙾𝙽 𝙽𝙰𝙼𝙴 ✯* - 𝚀𝚞𝚎𝚎𝚗_𝙰𝚑𝚒𝚗𝚜𝚊-𝚞𝚒𝚍~
+*✯ 𝚄𝚂𝙴𝚁 𝙽𝚄𝙼𝙱𝙴𝚁 ✯* - ${ownerNumber}
+*✯ 𝙱𝚘𝚝 𝙾𝚠𝚗𝚎𝚛 ✯* - +94754871798
+*✯ 𝙱𝚘𝚝 𝙲𝚑𝚊𝚗𝚐𝚎 𝚂𝚎𝚝𝚝𝚒𝚗𝚐𝚜 ✯* - setting
+*✯ 𝙱𝚘𝚝 𝙿𝚛𝚎𝚏𝚒𝚡 ✯* - ${prefix}
+*✯ 𝚋𝚘𝚝 𝚄𝚙𝚝𝚒𝚖𝚎 ✯* - 
+*✯ 𝙾𝚠𝚗𝚎𝚛 𝙽𝚊𝚖𝚎 ✯* - ✯𝙳𝚒𝚕𝚒𝚜𝚑𝚊 𝙶𝚒𝚖𝚜𝚑𝚊𝚗✯
+
+☫ *𝙳𝚎𝚟𝚎𝚕𝚘𝚙𝚎𝚍 𝙱𝚢 𝙳𝚒𝚕𝚒𝚜𝚑𝚊𝚃𝚎𝚌𝚑* ㋡
+`;
+conn.sendMessage(ownerNumber + "@s.whatsapp.net", { image: { url: `https://files.catbox.moe/6qxk37.jpg` }, caption: up })
 
 }
 })
@@ -207,7 +212,7 @@ command.function(conn, mek, m,{from, l, quoted, body, isCmd, command, args, q, i
 })
 }
 app.get("/", (req, res) => {
-res.send("HEY, Queen_Ahinsa-MD STARTED ✅");
+res.send("𝚉𝚘𝚖𝚋𝚒𝚎 𝙸𝚗𝚓𝚎𝚌𝚝𝚎𝚍 𝚆𝚑𝚊𝚝𝚜𝚊𝚙𝚙 ✅");
 });
 app.listen(port, () => console.log(`Server listening on port http://localhost:${port}`));
 setTimeout(() => {
