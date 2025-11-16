@@ -1,334 +1,261 @@
-const axios = require("axios");
-const NodeCache = require("node-cache");
-const { cmd } = require("../command"); 
+const l = console.log;
+const config = require('../config'); // Bot configuration
+const { cmd } = require('../command'); // Command framework
+const axios = require('axios'); // HTTP client
+const NodeCache = require('node-cache'); // Cache
 
-// Cinesubz API Settings
-const API_KEY = "25f974dba76310042bcd3c9488eec9093816ef32eb36d34c1b6b875ac9215932"; 
+// --- CINESUBZ API CONFIGURATION ---
+const API_KEY = "15d9dcfa502789d3290fd69cb2bdbb9ab919fab5969df73b0ee433206c58e05b";
 const BASE = "https://foreign-marna-sithaunarathnapromax-9a005c2e.koyeb.app/api/cinesubz";
 
-// Endpoints
 const SEARCH_ENDPOINT = `${BASE}/search`;
 const MOVIE_DETAILS_ENDPOINT = `${BASE}/movie-details`;
 const TVSHOW_DETAILS_ENDPOINT = `${BASE}/tvshow-details`;
 const EPISODE_DETAILS_ENDPOINT = `${BASE}/episode-details`;
-const DOWNLOAD_ENDPOINT = `${BASE}/downloadurl`;
+const DOWNLOAD_ENDPOINT = `${BASE}/downloadurl`; // Final download URL fetcher
+// ----------------------------------
 
-module.exports = (conn) => {
-  const cache = new NodeCache({ stdTTL: 180 });
-  const waitReply = new Map();
+// Cache search results for 180 seconds
+const searchCache = new NodeCache({ 'stdTTL': 180, 'checkperiod': 60 });
+const stateMap = new Map(); // Map to hold interactive session data
 
-  // ─────── SEARCH COMMAND ──────────────────────────────────────────────
-  cmd({
-    pattern: "cinesubz",
-    desc: "Cinesubz චිත්‍රපට / ටීවී සෙවීම",
-    react: "🍿",
-    category: "Movie",
-    filename: __filename
-  }, async (client, quoted, msg, { from, q }) => {
+// ───── SIZE PARSER ─────────────────────────────
+function sizeToGB(str) {
+    if (!str) return 3; // Default to 3GB if size is unknown (too large)
+    let s = str.toUpperCase().replace(",", ".");
+    const match = s.match(/(\d+.?\d*)\s*(GB|MB)/);
+    if (!match) return 3;
+    const value = parseFloat(match[1]);
+    const unit = match[2];
+    if (unit === "GB") return value;
+    if (unit === "MB") return value / 1024;
+    return 3;
+}
 
-    if (!q) return client.sendMessage(from, { text: "භාවිතය: .cinesubz <චිත්‍රපට/ටීවී නම>" }, { quoted: msg });
+// ───── MAIN COMMAND DEFINITION ─────────────────────────────
+cmd({
+    'pattern': 'cinesubz',
+    'react': '🎬',
+    'desc': 'Search and download Movies/TV Series from Cinesubz',
+    'category': 'download',
+    'filename': __filename
+}, async (bot, message, context, { from, q: searchQuery }) => {
+    // 1. Handle No Search Query
+    if (!searchQuery) {
+        await bot.sendMessage(from, {
+            'text': '*💡 භාවිතය: .cinesubz <Movie/TV-Show Name>*\n\n📝 උදාහරණ: .cinesubz Game of Thrones'
+        }, { 'quoted': message });
+        return;
+    }
 
     try {
-      const key = "cinesubz_search_" + q.toLowerCase();
-      let data = cache.get(key);
+        const cacheKey = 'cinesubz_search_' + searchQuery.toLowerCase().trim();
+        let apiData = searchCache.get(cacheKey);
 
-      if (!data) {
-        // API Call for Search 
-        const r = await axios.get(`${SEARCH_ENDPOINT}?apiKey=${API_KEY}&q=${encodeURIComponent(q)}`, { timeout: 120000 });
-        
-        if (!r.data?.data?.length) throw new Error("❌ චිත්‍රපට හෝ TV Shows කිසිවක් සොයා ගැනීමට නොහැක.");
+        // 2. Search Logic (API Call & Caching)
+        if (!apiData) {
+            await bot.sendMessage(from, { 'text': '🔍 සෙවීම ආරම්භ කරයි...' }, { 'quoted': message });
+            const searchUrl = `${SEARCH_ENDPOINT}?apiKey=${API_KEY}&q=${encodeURIComponent(searchQuery)}`;
+            
+            const response = await axios.get(searchUrl, { 'timeout': 120000 });
+            apiData = response.data;
 
-        data = r.data.data;
-        cache.set(key, data);
-      }
+            if (!apiData?.data?.length) {
+                throw new Error('❌ කිසිවක් සොයාගත නොහැක.');
+            }
+            searchCache.set(cacheKey, apiData);
+        }
 
-      let caption = `*🍿 Cinesubz සෙවුම් ප්‍රතිඵල*\n\n`;
-      data.slice(0, 10).forEach((m, i) => { // Top 10 results only
-        caption += `${i + 1}. *${m.title}* (${m.year}) ⭐ ${m.rating || 'N/A'}\n\n`;
-      });
-      caption += `විස්තර ලබා ගැනීමට ඉහත ලැයිස්තුවෙන් අංකයක් සමඟින් පිළිතුරු (Reply) දෙන්න.`;
+        // 3. Format Search Results for Display
+        const results = apiData.data.slice(0, 10).map((item, index) => ({
+            'n': index + 1, 
+            'title': item.title, 
+            'rating': item.rating || 'N/A', 
+            'year': item.year || 'N/A', 
+            'link': item.link, // Crucial for next step
+            'image': item.imageSrc || 'https://via.placeholder.com/300x450'
+        }));
 
-      const sent = await client.sendMessage(from, {
-        image: { url: data[0].imageSrc || 'https://via.placeholder.com/300x450?text=Cinesubz' },
-        caption
-      }, { quoted: msg });
+        let replyText = '*🍿 Cinesubz සෙවුම් ප්‍රතිඵල*\n\n';
+        for (const item of results) {
+            replyText += `🎬 *${item.n}. ${item.title}* (${item.year})\n  ⭐ Rating: ${item.rating}\n\n`;
+        }
+        replyText += 'තෝරාගැනීමට අංකය Reply කරන්න.';
 
-      waitReply.set(from, {
-        step: "select_movie",
-        list: data.slice(0, 10),
-        msgId: sent.key.id
-      });
+        // 4. Send Results and Setup Interactive Listener
+        const sentMessage = await bot.sendMessage(from, {
+            'image': { 'url': results[0].image }, 
+            'caption': replyText
+        }, { 'quoted': message });
 
-    } catch (e) {
-      return client.sendMessage(from, { text: "❌ සෙවුම් දෝෂය: " + e.message }, { quoted: msg });
+        // Setup the state for the next step (Movie Selection)
+        stateMap.set(from, {
+            step: "select_movie",
+            list: results,
+            msgId: sentMessage.key.id
+        });
+
+    } catch (error) {
+        l(error);
+        await bot.sendMessage(from, { 'text': '❌ සෙවීමේ දෝෂය: ' + error.message }, { 'quoted': message });
     }
-  });
+});
 
-
-  // ─────── GLOBAL REPLY DETECTOR ───────────────────────────────────────
-  conn.ev.on("messages.upsert", async ({ messages }) => {
+// ───── REPLY HANDLER ─────────────────────────────
+bot.ev.on("messages.upsert", async ({ messages }) => {
     const m = messages[0];
     if (!m.message || m.key.fromMe) return;
 
     const from = m.key.remoteJid;
-    const contextInfo = m.message?.extendedTextMessage?.contextInfo;
-    const text = m.message.conversation || m.message.extendedTextMessage?.text || "";
+    const ctx = m.message?.extendedTextMessage?.contextInfo;
+    const text = (m.message.conversation || m.message.extendedTextMessage?.text || "").trim();
+    const selected = stateMap.get(from);
 
-    const selected = waitReply.get(from);
     if (!selected) return;
-
-    const isReply = contextInfo?.stanzaId === selected.msgId;
-
-    if (!isReply) return; 
-
-    const num = parseInt(text.trim());
-    if (isNaN(num)) return; 
-
-    await conn.sendMessage(from, { react: { text: "🔍", key: m.key } });
-
-    // ─── STEP 1 : USER SELECTED MOVIE (Get Details) ───────────────
-    if (selected.step === "select_movie") {
-      const movie = selected.list[num - 1];
-      if (!movie) {
-        await conn.sendMessage(from, { react: { text: "❌", key: m.key } });
-        return conn.sendMessage(from, { text: "❌ වලංගු නොවන අංකයකි." });
-      }
-
-      waitReply.delete(from);
-
-      try {
-        const link = movie.link;
-        let details;
-        let detailsEndpoint;
-
-        // Determine if it's a Movie or TV Show based on the link (Simple heuristic)
-        if (link.includes('/tvshows/') || link.includes('-episode-')) {
-          detailsEndpoint = link.includes('-episode-') ? EPISODE_DETAILS_ENDPOINT : TVSHOW_DETAILS_ENDPOINT;
-        } else {
-          detailsEndpoint = MOVIE_DETAILS_ENDPOINT;
-        }
-
-        // Get Movie/TV Show Details
-        const r = await axios.get(`${detailsEndpoint}?apiKey=${API_KEY}&url=${encodeURIComponent(link)}`, { timeout: 120000 });
-        details = r.data;
-
-        if (!details.title) throw new Error("විස්තර ලබා ගැනීමට නොහැක.");
-
-        let detailsCaption = `*🎬 ${details.title || movie.title}*\n\n`;
-        detailsCaption += `⭐ *IMDb Rating:* ${details.rating || 'N/A'}\n`;
-        detailsCaption += `📅 *Release Year:* ${details.year || 'N/A'}\n`;
-        detailsCaption += `🎭 *Genres:* ${(details.genres || []).join(', ') || 'N/A'}\n`;
-        detailsCaption += `📜 *Summary:*\n${(details.summary || details.description || movie.summary || 'N/A').substring(0, 300)}...\n\n`;
-
-        // Check for direct download link or episodes
-        const hasDownloadLink = details.downloadLink || details.links?.length > 0;
-        const hasEpisodes = details.episodes?.length > 0;
-        
-        // Handling Episodes (If it's a TV Show)
-        if (hasEpisodes) {
-            detailsCaption += `📺 *Available Episodes:*\n`;
-            details.episodes.slice(0, 5).forEach((ep, i) => {
-                 detailsCaption += `${i + 1}. ${ep.title}\n`;
-            });
-            detailsCaption += `\n*Reply with the Episode number* to get its details or download link.`;
-
-            const sent2 = await client.sendMessage(from, {
-              image: { url: details.imageSrc || movie.imageSrc || 'https://via.placeholder.com/300x450?text=Cinesubz+Details' },
-              caption: detailsCaption
-            }, { quoted: m });
-            
-            // Set the next interaction state to select episode
-            waitReply.set(from, {
-                step: "select_episode",
-                movie,
-                episodes: details.episodes,
-                msgId: sent2.key.id
-            });
-            
-        // Handling Movie Download Link
-        } else if (hasDownloadLink || link.includes('/movies/')) {
-            detailsCaption += `📥 *බාගත කිරීමට අංක 1 සමඟින් පිළිතුරු (Reply) දෙන්න.*`;
-
-            const sent2 = await client.sendMessage(from, {
-                image: { url: details.imageSrc || movie.imageSrc || 'https://via.placeholder.com/300x450?text=Cinesubz+Details' },
-                caption: detailsCaption
-            }, { quoted: m });
-            
-            // Set the next interaction state to confirm download
-            waitReply.set(from, {
-                step: "confirm_download",
-                movie,
-                link: link,
-                msgId: sent2.key.id
-            });
-        } else {
-            await client.sendMessage(from, { text: detailsCaption + "\n\n❌ බාගත කිරීමේ සබැඳි හෝ Episodes සොයා ගැනීමට නොහැක." }, { quoted: m });
-        }
-        
-        await conn.sendMessage(from, { react: { text: "📜", key: m.key } });
-
-      } catch (err) {
-        await conn.sendMessage(from, { react: { text: "❌", key: m.key } });
-        conn.sendMessage(from, { text: "❌ දෝෂය: විස්තර ලබා ගැනීමේදී ගැටළුවක්: " + err.message });
-      }
-    }
     
-    // ─── STEP 2 : USER CONFIRMED DOWNLOAD / SELECTED EPISODE ───────────
-    else if (selected.step === "confirm_download") {
-        if (num !== 1) { // Only accept '1' for movie download confirmation
-             await conn.sendMessage(from, { react: { text: "❌", key: m.key } });
-             return conn.sendMessage(from, { text: "❌ බාගත කිරීම ආරම්භ කිරීමට අංක *1* සමඟින් පිළිතුරු දෙන්න." });
-        }
-        
-        const movieLink = selected.link;
-        waitReply.delete(from);
+    // Check if the reply is to the bot's last message for this session
+    const isReply = ctx?.quotedMessage?.stanzaId === selected.msgId || ctx?.stanzaId === selected.msgId;
+    if (!isReply) return;
+    
+    // Check for "off" command to clear session
+    if (text.toLowerCase() === 'off') {
+        stateMap.delete(from);
+        return bot.sendMessage(from, { text: 'OK. සෙවුම අවලංගු කරන ලදී.' }, { quoted: m });
+    }
+
+    const num = parseInt(text);
+    if (isNaN(num)) return; // Ignore non-numeric replies
+
+    // --- STEP 1: SELECT MOVIE / TV SHOW ---
+    if (selected.step === "select_movie") {
+        const movie = selected.list[num - 1];
+        if (!movie) return bot.sendMessage(from, { text: "❌ වලංගු නොවන අංකයකි." });
+        stateMap.delete(from); // Clear temporary selection list
 
         try {
-            // Get Download Links
-            const dl = await axios.get(`${DOWNLOAD_ENDPOINT}?apiKey=${API_KEY}&url=${encodeURIComponent(movieLink)}`, { timeout: 120000 });
+            await bot.sendMessage(from, { react: { text: "⏳", key: m.key } });
+            const link = movie.link;
+            let detailsEndpoint;
+            let isTvshow = link.includes('/tvshows/');
             
-            if (!dl.data?.links?.length) {
-              await conn.sendMessage(from, { react: { text: "❌", key: m.key } });
-              return conn.sendMessage(from, { text: "❌ බාගත කිරීමේ සබැඳි සොයා ගැනීමට නොහැක." });
+            if (isTvshow) {
+                detailsEndpoint = TVSHOW_DETAILS_ENDPOINT;
+            } else {
+                detailsEndpoint = MOVIE_DETAILS_ENDPOINT;
             }
+
+            const r = await axios.get(`${detailsEndpoint}?apiKey=${API_KEY}&url=${encodeURIComponent(link)}`, { timeout: 120000 });
+            const details = r.data;
+            if (!details.title) throw new Error("විස්තර ලබා ගැනීමට නොහැක.");
+
+            let detailsCaption = `*🎬 ${details.title}*\n\n`;
+            detailsCaption += `⭐ IMDb Rating: ${details.rating || 'N/A'}\n`;
+            detailsCaption += `📅 Release: ${details.year || movie.year || 'N/A'}\n`;
+            detailsCaption += `🎭 Genres: ${(details.genres || []).join(', ') || 'N/A'}\n\n`;
+            detailsCaption += `📜 Summary:\n${(details.summary || details.description || movie.summary || "N/A").substring(0, 350)}...\n\n`;
+
+            const hasEpisodes = isTvshow && details.episodes?.length > 0;
             
-            const downloadLinks = dl.data.links;
-
-            let caption = `*🎬 ${selected.movie.title}*\n\nබාගත කිරීමේ ගුණාත්මකභාවය (Quality) තෝරන්න:\n\n`;
-            downloadLinks.forEach((l, i) => {
-              caption += `${i + 1}. *${l.quality}* - ${l.size}\n\n`;
-            });
-            caption += `බාගත කිරීම ආරම්භ කිරීමට අංකයක් සමඟින් පිළිතුරු (Reply) දෙන්න.`;
-
-            const sent3 = await conn.sendMessage(from, {
-                caption
-            }, { quoted: m });
-
-            // Set the next interaction state for quality selection
-            waitReply.set(from, {
-                step: "select_quality",
-                movie: selected.movie,
-                links: downloadLinks,
-                msgId: sent3.key.id
-            });
-
-            await conn.sendMessage(from, { react: { text: "📥", key: m.key } });
-
+            if (hasEpisodes) {
+                // --- TV SHOW: SELECT EPISODE ---
+                detailsCaption += `📺 *Available Episodes:*\n`;
+                details.episodes.slice(0, 5).forEach((ep, i) => {
+                    detailsCaption += `${i + 1}. ${ep.title}\n`;
+                });
+                detailsCaption += `\nEpisode එකක් තේරීමට අංකය Reply කරන්න.`;
+                const sent2 = await bot.sendMessage(from, { image: { url: details.imageSrc || movie.imageSrc }, caption: detailsCaption }, { quoted: m });
+                stateMap.set(from, { step: "select_episode", details, episodes: details.episodes.slice(0, 5), msgId: sent2.key.id });
+            } else {
+                // --- MOVIE: PROCEED TO DOWNLOAD QUALITY ---
+                if (!details.download?.length) throw new Error("Download විකල්ප නොමැත.");
+                await sendQualityOptions(bot, from, m, details);
+            }
         } catch (err) {
-            await conn.sendMessage(from, { react: { text: "❌", key: m.key } });
-            conn.sendMessage(from, { text: "❌ දෝෂය: සබැඳි ලබා ගැනීමේදී ගැටළුවක්: " + err.message });
+            return bot.sendMessage(from, { text: "❌ දෝෂය: " + err.message });
         }
     }
-    
-    // ─── STEP 2 (Alternate) : USER SELECTED EPISODE ────────────────────
+
+    // --- STEP 2: SELECT EPISODE (For TV Shows) ---
     else if (selected.step === "select_episode") {
-      const episode = selected.episodes[num - 1];
-      if (!episode) {
-        await conn.sendMessage(from, { react: { text: "❌", key: m.key } });
-        return conn.sendMessage(from, { text: "❌ වලංගු නොවන අංකයකි." });
-      }
+        const episode = selected.episodes[num - 1];
+        if (!episode) return bot.sendMessage(from, { text: "❌ වලංගු නොවන Episode අංකයකි." });
+        stateMap.delete(from);
 
-      waitReply.delete(from);
+        try {
+            await bot.sendMessage(from, { react: { text: "⏳", key: m.key } });
+            // Get episode details to find download options
+            const r = await axios.get(`${EPISODE_DETAILS_ENDPOINT}?apiKey=${API_KEY}&url=${encodeURIComponent(episode.link)}`, { timeout: 120000 });
+            const details = r.data;
+            if (!details.download?.length) throw new Error("Download විස්තර ලබා ගැනීමට නොහැක.");
 
-      // Treat episode link as the download link for Step 3
-      // Go directly to the download process for the selected episode
-      try {
-          // Get Download Links for the Episode
-          const dl = await axios.get(`${DOWNLOAD_ENDPOINT}?apiKey=${API_KEY}&url=${encodeURIComponent(episode.link)}`, { timeout: 120000 });
-          
-          if (!dl.data?.links?.length) {
-              await conn.sendMessage(from, { react: { text: "❌", key: m.key } });
-              return conn.sendMessage(from, { text: "❌ Episode එක සඳහා බාගත කිරීමේ සබැඳි සොයා ගැනීමට නොහැක." });
-          }
-          
-          const downloadLinks = dl.data.links;
-
-          let caption = `*📺 ${selected.movie.title} - ${episode.title}*\n\nබාගත කිරීමේ ගුණාත්මකභාවය තෝරන්න:\n\n`;
-          downloadLinks.forEach((l, i) => {
-            caption += `${i + 1}. *${l.quality}* - ${l.size}\n\n`;
-          });
-          caption += `බාගත කිරීම ආරම්භ කිරීමට අංකයක් සමඟින් පිළිතුරු (Reply) දෙන්න.`;
-
-          const sent3 = await conn.sendMessage(from, {
-              caption
-          }, { quoted: m });
-
-          // Set the next interaction state for quality selection
-          waitReply.set(from, {
-              step: "select_quality",
-              movie: selected.movie, // Retain the main movie info
-              links: downloadLinks,
-              msgId: sent3.key.id
-          });
-
-          await conn.sendMessage(from, { react: { text: "📥", key: m.key } });
-
-      } catch (err) {
-            await conn.sendMessage(from, { react: { text: "❌", key: m.key } });
-            conn.sendMessage(from, { text: "❌ දෝෂය: Episode සබැඳි ලබා ගැනීමේදී ගැටළුවක්: " + err.message });
-      }
+            // Proceed to quality selection
+            await sendQualityOptions(bot, from, m, details);
+            
+        } catch (err) {
+            return bot.sendMessage(from, { text: "❌ Episode Details දෝෂය: " + err.message });
+        }
     }
 
-
-    // ─── STEP 3 : USER SELECTED QUALITY (Final Download) ──────────────
+    // --- STEP 3: SELECT QUALITY AND DOWNLOAD ---
     else if (selected.step === "select_quality") {
-      const link = selected.links[num - 1];
-      if (!link) {
-        await conn.sendMessage(from, { react: { text: "❌", key: m.key } });
-        return conn.sendMessage(from, { text: "❌ වලංගු නොවන අංකයකි." });
-      }
+        const qualityOption = selected.downloadOptions[num - 1];
+        if (!qualityOption) return bot.sendMessage(from, { text: "❌ වලංගු නොවන Quality අංකයකි." });
+        stateMap.delete(from);
 
-      waitReply.delete(from);
-      
-      const downloadURL = link.url;
-      const GB = sizeToGB(link.size);
+        const sizeGB = sizeToGB(qualityOption.size);
+        if (sizeGB > 2) {
+            // If file is too large, send the intermediate link for browser download
+            return bot.sendMessage(from, { text: `⚠️ ගොනුව විශාල වැඩිය (>${sizeGB.toFixed(2)} GB). \n\nඔබට පහත සබැඳිය browser එකකින් විවෘත කර බාගත කළ හැක:\n${qualityOption.link}` }, { quoted: m });
+        }
 
-      // Auto handle large file (2.5GB limit)
-      if (GB > 2.5) { 
-        await conn.sendMessage(from, { react: { text: "⚠️", key: m.key } });
-        return conn.sendMessage(from, {
-          text: `⚠️ ගොනුව WhatsApp හරහා යැවීමට විශාල වැඩිය. (Size: ${link.size})\n\nසෘජු බාගත කිරීමේ සබැඳිය (Direct Download link):\n${downloadURL}`
-        });
-      }
+        try {
+            await bot.sendMessage(from, { react: { text: "📥", key: m.key } });
+            
+            // --- FETCH FINAL DOWNLOAD URL ---
+            const r = await axios.get(`${DOWNLOAD_ENDPOINT}?apiKey=${API_KEY}&url=${encodeURIComponent(qualityOption.link)}`, { timeout: 120000 });
+            const finalUrl = r.data.url;
 
-      try {
-        await conn.sendMessage(from, { react: { text: "⏳", key: m.key } }); 
+            if (!finalUrl) throw new Error("Download Link එක ලබා ගැනීමට නොහැක.");
+            
+            // --- SEND FILE ---
+            const title = selected.details.title || 'Movie/Episode';
+            const caption = `*✅ සාර්ථකයි*\n\n🎬 Title: ${title}\n📊 Quality: ${qualityOption.quality} (${qualityOption.size})\n\n${config.MOVIE_FOOTER}`;
+            const fileName = `${title.replace(/[^a-zA-Z0-9\s]/g, '_')}_${qualityOption.quality}.mp4`;
 
-        // Send the movie file as a document
-        await conn.sendMessage(from, {
-          document: { url: downloadURL },
-          mimetype: "video/mp4", 
-          fileName: `${selected.movie.title} ${link.quality}.mp4`,
-          caption: `🎬 ${selected.movie.title}\nQuality: ${link.quality}\nSize: ${link.size}\n\nබාගත කිරීම සාර්ථකයි! ✅`
-        });
+            await bot.sendMessage(from, {
+                document: { url: finalUrl },
+                mimetype: 'video/mp4',
+                fileName: fileName,
+                caption: caption
+            }, { quoted: m });
 
-        await conn.sendMessage(from, { react: { text: "✅", key: m.key } });
-
-      } catch (err) {
-        await conn.sendMessage(from, { react: { text: "❌", key: m.key } });
-        conn.sendMessage(from, {
-          text: `❌ යැවීම අසාර්ථක විය. (Error: ${err.message})\n\nසෘජු බාගත කිරීමේ සබැඳිය (Direct link):\n${downloadURL}`
-        });
-      }
+        } catch (err) {
+            console.error(err);
+            // If final download fails, send the intermediate link
+            return bot.sendMessage(from, { text: `❌ ගොනුව යැවීමේ දෝෂයකි. (Error: ${err.message}). ඔබට Link එක browser එකකින් භාවිතා කළ හැක:\n\n${qualityOption.link}` }, { quoted: m });
+        }
     }
-  });
+});
 
-};
+/**
+ * Helper function to send quality selection message
+ */
+async function sendQualityOptions(bot, from, m, details) {
+    const downloadOptions = details.download.filter(opt => opt.link);
+    if (downloadOptions.length === 0) {
+        return bot.sendMessage(from, { text: "❌ මෙම චිත්‍රපටය / කථාංගය සඳහා Download විකල්ප නොමැත." });
+    }
 
+    let qualityCaption = `*📥 ${details.title}*\n\n`;
+    downloadOptions.slice(0, 5).forEach((opt, i) => {
+        qualityCaption += `${i + 1}. *${opt.quality}* (${opt.size || 'N/A'})\n`;
+    });
+    qualityCaption += `\nඔබට අවශ්‍ය Quality එකේ අංකය Reply කරන්න.`;
 
-// ─────── SIZE PARSER ─────────────────────────────────────────────────
-function sizeToGB(str) {
-  if (!str) return 0;
-  let s = str.toUpperCase().replace(",", ".");
-  const match = s.match(/(\d+\.?\d*)\s*(GB|MB)/);
+    const sent = await bot.sendMessage(from, {
+        image: { url: details.imageSrc || 'https://via.placeholder.com/300x450' },
+        caption: qualityCaption
+    }, { quoted: m });
 
-  if (!match) return 0;
-
-  const value = parseFloat(match[1]);
-  const unit = match[2];
-
-  if (unit === "GB") return value;
-  if (unit === "MB") return value / 1024;
-
-  return 0;
+    stateMap.set(from, { step: "select_quality", details, downloadOptions, msgId: sent.key.id });
 }
