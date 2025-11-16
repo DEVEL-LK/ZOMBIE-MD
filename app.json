@@ -1,7 +1,7 @@
 {
-  "name": "Queen_Ahinsa-MD",
-  "description": "ᴊᴀᴠᴀsᴄʀɪᴘᴛ ᴡʜᴀᴛsᴀᴘᴘ ʙᴏᴛ ᴄʀᴇᴀᴛᴇᴅ ʙʏ Queen_Ahinsa-MD",
-  "logo": "https://i.ibb.co/SR76mBh/Pu3-ZYHBS5139.jpg",
+  "name": "ZOMBIE-MD",
+  "description": "𝚉𝚘𝚖𝚋𝚒𝚎 𝙸𝙽𝙲𝙻𝚄𝙳𝙴 𝚆𝙷𝙰𝚃𝚂𝙰𝙿𝙿 𝙱𝙾𝚃 𝙸𝚂 𝙼𝚄𝚃𝙴𝙳 𝚃𝙷𝙸𝚂 𝚂𝚃𝙰𝚁𝚃𝙴𝙳",
+  "logo": "https://files.catbox.moe/6qxk37.jpg",
   "keywords": ["bot"],
   "success_url": "/",
 
@@ -16,7 +16,7 @@
     "MONGODB": {
       "description": "you can use this public mongodb url if you have your personal key So you can use him.",
       "required": true,
-      "value": "mongodb+srv://suhail:suhail@clustere.tuhzpez.mongodb.net/?retryWrites=true&w=majority"
+      "value": "mongodb://mongo:LIgXtSmvDMcshanQicXNZTLQpnstpplG@switchyard.proxy.rlwy.net:12462"
     }
 },
 
