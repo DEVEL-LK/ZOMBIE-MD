@@ -57,7 +57,7 @@ cmd({
                 }
             }
 
-            // *** FIX 1: Search API Response Check: Use 'data' instead of 'results' ***
+            // FIX 1: Search API Response Check: Use 'data' instead of 'results'
             if (!apiData?.status || !apiData?.data?.length) {
                 throw new Error('No results found.');
             }
@@ -65,14 +65,14 @@ cmd({
         }
 
         // 3. Format Search Results for Display
-        // *** FIX 2: Search API Data Mapping: Use 'apiData.data' and correct field names ***
+        // FIX 2: Search API Data Mapping: Use 'apiData.data' and correct field names
         const results = apiData.data.map((item, index) => ({
             'n': index + 1, 
-            'title': item.Title, // Use 'Title'
-            'imdb': item.Rating || 'N/A', // Use 'Rating' for IMDB/Rating
-            'year': item.Year || 'N/A', // Use 'Year'
-            'link': item.Link, // Use 'Link' - Crucial for next step
-            'image': item.Img // Use 'Img' for thumbnail
+            'title': item.Title, 
+            'imdb': item.Rating || 'N/A', 
+            'year': item.Year || 'N/A', 
+            'link': item.Link, 
+            'image': item.Img
         }));
 
         let replyText = '*🎬 SEARCH RESULTS*\n\n';
@@ -140,17 +140,16 @@ cmd({
                 let thumbnailUrl = selectedFilm.image;
                 
                 if (isTvEpisode) {
-                    // *** FIX 3a: TV DL Response is an array of objects. Map finalDownloadUrl to 'link' ***
+                    // FIX 3a: TV DL Response. Filter for usable hosts and map finalDownloadUrl to 'link'
                     downloadLinks = downloadData.data.filter(link => 
                         link.finalDownloadUrl && (link.host === 'DLServer-01' || link.host === 'DLServer-02' || link.host === 'Usersdrive')
                     ).map(link => ({
                         'quality': link.quality,
                         'size': 'N/A', 
-                        'link': link.finalDownloadUrl // Use 'link' key for consistency
+                        'link': link.finalDownloadUrl
                     }));
-                    // Note: If you need TV info (thumbnail/title) before episode DL, you need another API call (info).
                 } else {
-                    // *** FIX 3b: Movie DL Response uses 'downloadLinks' array ***
+                    // FIX 3b: Movie DL Response uses 'downloadLinks' array
                     downloadLinks = downloadData.data.downloadLinks;
                     thumbnailUrl = downloadData.data.images?.[0] || selectedFilm.image; 
                 }
@@ -159,15 +158,23 @@ cmd({
                 const picks = [];
                 const availableQualities = {};
                 
-                // *** FIX 4: Correctly read 'link' field from download object and map to 'direct_download' ***
+                // FIX 4 & 5: Correctly read 'link' field and apply strict direct download filter
                 for (let i = 0; i < downloadLinks.length; i++) {
                     const link = downloadLinks[i];
                     
                     const quality = link.quality;
                     const size = link.size || 'N/A';
-                    const directLink = link.link; // 'link' is used for both Movie DL and TV DL (after mapping)
+                    const directLink = link.link; 
                     
-                    if (directLink) {
+                    // --- Strict Direct Link Filter (Prevents 4.9KB file issue) ---
+                    const isDirectDownload = directLink && (
+                        directLink.endsWith('.mp4') || 
+                        directLink.endsWith('.mkv') || 
+                        directLink.includes('cdn.sinhalasub.net') || // Specific DLServer host
+                        directLink.includes('ddl.sinhalasub.net')   // Specific DLServer host
+                    );
+                    
+                    if (isDirectDownload) {
                         const qKey = quality.toUpperCase().replace(/\s/g, ''); 
                         let priority = 0;
                         if (qKey.includes('1080P') || qKey.includes('FHD')) priority = 3;
@@ -188,9 +195,9 @@ cmd({
                     picks.push({ 'n': i + 1, ...sortedPicks[i] });
                 }
 
-                // *** Check if any links were successfully parsed ***
+                // Check if any links were successfully parsed
                 if (!picks.length) {
-                    await bot.sendMessage(from, { 'text': '❌ No usable direct download links found from selected hosts.' }, { 'quoted': incomingMessage });
+                    await bot.sendMessage(from, { 'text': '❌ No usable direct download links found. Try selecting another movie.' }, { 'quoted': incomingMessage });
                     return;
                 }
 
