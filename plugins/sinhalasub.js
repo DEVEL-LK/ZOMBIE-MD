@@ -166,12 +166,13 @@ cmd({
                     const size = link.size || 'N/A';
                     const directLink = link.link; 
                     
-                    // --- Strict Direct Link Filter (Prevents 4.9KB file issue) ---
+                    // --- Looser Direct Link Filter (Prevents "No usable links" error) ---
                     const isDirectDownload = directLink && (
                         directLink.endsWith('.mp4') || 
                         directLink.endsWith('.mkv') || 
-                        directLink.includes('cdn.sinhalasub.net') || // Specific DLServer host
-                        directLink.includes('ddl.sinhalasub.net')   // Specific DLServer host
+                        directLink.includes('download.mp4') || // Check for specific phrases in the URL
+                        directLink.includes('ddl.sinhalasub.net') || // Specific DLServer host
+                        directLink.includes('cdn.sinhalasub.net')   // Specific DLServer host
                     );
                     
                     if (isDirectDownload) {
@@ -197,7 +198,7 @@ cmd({
 
                 // Check if any links were successfully parsed
                 if (!picks.length) {
-                    await bot.sendMessage(from, { 'text': '❌ No usable direct download links found. Try selecting another movie.' }, { 'quoted': incomingMessage });
+                    await bot.sendMessage(from, { 'text': '❌ No usable direct download links found. The API provided links are not direct MP4/MKV files.' }, { 'quoted': incomingMessage });
                     return;
                 }
 
