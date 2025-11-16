@@ -1,4 +1,4 @@
-const l = console.log; // Syntax Error Fixed: 'const' used instead of 'Const'
+const l = console.log; // Corrected: Used 'const' instead of 'Const'
 const config = require('../config'); // Bot configuration
 const { cmd } = require('../command'); // Command framework
 const axios = require('axios'); // HTTP client
@@ -133,7 +133,7 @@ cmd({
     'desc': 'Cinesubz interactive session handler',
     'doNotAdd': true 
 }, async (bot, m, context) => {
-    // 'bot' is defined here.
+    // 'bot' is defined here as an argument.
     
     const from = m.key.remoteJid;
     const ctx = m.message?.extendedTextMessage?.contextInfo;
@@ -146,8 +146,7 @@ cmd({
     // 1. Only proceed if an active session exists
     if (!selected) return;
     
-    // 2. ❗ IMPROVED REPLY CHECK ❗
-    // Check if contextInfo and quotedMessage exist AND if the quoted message's ID matches the stored message ID.
+    // 2. IMPROVED REPLY CHECK: Check if contextInfo and quotedMessage exist AND if the quoted message's ID matches the stored message ID.
     const isReply = (ctx && ctx.quotedMessage) 
                     && (ctx.quotedMessage.stanzaId === selected.msgId);
     
@@ -166,10 +165,11 @@ cmd({
     if (selected.step === "select_movie") {
         const movie = selected.list[num - 1];
         if (!movie) return bot.sendMessage(from, { text: "❌ වලංගු නොවන අංකයකි." }, { quoted: m });
-        stateMap.delete(from); // Clear temporary selection list
-
+        
         try {
             await bot.sendMessage(from, { react: { text: "⏳", key: m.key } });
+            stateMap.delete(from); // Clear state after successful reaction (before the time-consuming API call)
+
             const link = movie.link;
             let detailsEndpoint;
             let isTvshow = link.includes('/tvshows/');
@@ -180,6 +180,7 @@ cmd({
                 detailsEndpoint = MOVIE_DETAILS_ENDPOINT;
             }
 
+            // API Call for details
             const r = await axios.get(`${detailsEndpoint}?apiKey=${API_KEY}&url=${encodeURIComponent(link)}`, { timeout: 120000 });
             const details = r.data;
             if (!details.title) throw new Error("විස්තර ලබා ගැනීමට නොහැක.");
@@ -207,7 +208,9 @@ cmd({
                 await sendQualityOptions(bot, from, m, details);
             }
         } catch (err) {
-            return bot.sendMessage(from, { text: "❌ දෝෂය: " + err.message }, { quoted: m });
+            l(err); // Log the error to your console
+            // Report a specific error message back to the user
+            return bot.sendMessage(from, { text: "❌ විස්තර ලබා ගැනීමේ දෝෂයකි: " + (err.message || "API Timeout") }, { quoted: m });
         }
     }
 
@@ -231,7 +234,8 @@ cmd({
             await sendQualityOptions(bot, from, m, details);
             
         } catch (err) {
-            return bot.sendMessage(from, { text: "❌ Episode Details දෝෂය: " + err.message }, { quoted: m });
+            l(err);
+            return bot.sendMessage(from, { text: "❌ Episode Details දෝෂය: " + (err.message || "API Timeout") }, { quoted: m });
         }
     }
 
@@ -269,7 +273,7 @@ cmd({
             }, { quoted: m });
 
         } catch (err) {
-            console.error(err);
+            l(err);
             // If final download fails, send the intermediate link
             return bot.sendMessage(from, { text: `❌ ගොනුව යැවීමේ දෝෂයකි. (Error: ${err.message}). ඔබට Link එක browser එකකින් භාවිතා කළ හැක:\n\n${qualityOption.link}` }, { quoted: m });
         }
