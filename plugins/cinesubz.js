@@ -1,4 +1,4 @@
-const l = console.log;
+Const l = console.log;
 const config = require('../config'); // Bot configuration
 const { cmd } = require('../command'); // Command framework
 const axios = require('axios'); // HTTP client
@@ -32,7 +32,32 @@ function sizeToGB(str) {
     return 3;
 }
 
-// ───── MAIN COMMAND DEFINITION ─────────────────────────────
+/**
+ * Helper function to send quality selection message
+ */
+async function sendQualityOptions(bot, from, m, details) {
+    const downloadOptions = details.download.filter(opt => opt.link);
+    if (downloadOptions.length === 0) {
+        return bot.sendMessage(from, { text: "❌ මෙම චිත්‍රපටය / කථාංගය සඳහා Download විකල්ප නොමැත." });
+    }
+
+    let qualityCaption = `*📥 ${details.title}*\n\n`;
+    downloadOptions.slice(0, 5).forEach((opt, i) => {
+        qualityCaption += `${i + 1}. *${opt.quality}* (${opt.size || 'N/A'})\n`;
+    });
+    qualityCaption += `\nඔබට අවශ්‍ය Quality එකේ අංකය Reply කරන්න.`;
+
+    const sent = await bot.sendMessage(from, {
+        image: { url: details.imageSrc || 'https://via.placeholder.com/300x450' },
+        caption: qualityCaption
+    }, { quoted: m });
+
+    // Ensure 'details' contains the necessary info for the final step
+    stateMap.set(from, { step: "select_quality", details: details, downloadOptions, msgId: sent.key.id });
+}
+
+
+// ───── MAIN COMMAND DEFINITION (Search) ─────────────────────────────
 cmd({
     'pattern': 'cinesubz',
     'react': '🎬',
@@ -101,20 +126,26 @@ cmd({
     }
 });
 
-// ───── REPLY HANDLER ─────────────────────────────
-bot.ev.on("messages.upsert", async ({ messages }) => {
-    const m = messages[0];
-    if (!m.message || m.key.fromMe) return;
 
+// ───── REPLY HANDLER DEFINITION (bot.ev.on වෙනුවට) ─────────────
+// This command acts as the listener for replies to handle the interactive session.
+cmd({
+    'pattern': '', // An empty pattern runs on every message in many frameworks
+    'desc': 'Cinesubz interactive session handler',
+    'doNotAdd': true // Prevents adding to help menu if applicable
+}, async (bot, m, context) => {
+    // Here, 'bot' is the first argument, so it is defined and accessible.
+    
     const from = m.key.remoteJid;
     const ctx = m.message?.extendedTextMessage?.contextInfo;
     const text = (m.message.conversation || m.message.extendedTextMessage?.text || "").trim();
     const selected = stateMap.get(from);
 
+    // Only proceed if an active session exists
     if (!selected) return;
     
     // Check if the reply is to the bot's last message for this session
-    const isReply = ctx?.quotedMessage?.stanzaId === selected.msgId || ctx?.stanzaId === selected.msgId;
+    const isReply = ctx?.quotedMessage?.stanzaId === selected.msgId; // Simplified check
     if (!isReply) return;
     
     // Check for "off" command to clear session
@@ -129,7 +160,7 @@ bot.ev.on("messages.upsert", async ({ messages }) => {
     // --- STEP 1: SELECT MOVIE / TV SHOW ---
     if (selected.step === "select_movie") {
         const movie = selected.list[num - 1];
-        if (!movie) return bot.sendMessage(from, { text: "❌ වලංගු නොවන අංකයකි." });
+        if (!movie) return bot.sendMessage(from, { text: "❌ වලංගු නොවන අංකයකි." }, { quoted: m });
         stateMap.delete(from); // Clear temporary selection list
 
         try {
@@ -171,14 +202,14 @@ bot.ev.on("messages.upsert", async ({ messages }) => {
                 await sendQualityOptions(bot, from, m, details);
             }
         } catch (err) {
-            return bot.sendMessage(from, { text: "❌ දෝෂය: " + err.message });
+            return bot.sendMessage(from, { text: "❌ දෝෂය: " + err.message }, { quoted: m });
         }
     }
 
     // --- STEP 2: SELECT EPISODE (For TV Shows) ---
     else if (selected.step === "select_episode") {
         const episode = selected.episodes[num - 1];
-        if (!episode) return bot.sendMessage(from, { text: "❌ වලංගු නොවන Episode අංකයකි." });
+        if (!episode) return bot.sendMessage(from, { text: "❌ වලංගු නොවන Episode අංකයකි." }, { quoted: m });
         stateMap.delete(from);
 
         try {
@@ -188,18 +219,21 @@ bot.ev.on("messages.upsert", async ({ messages }) => {
             const details = r.data;
             if (!details.download?.length) throw new Error("Download විස්තර ලබා ගැනීමට නොහැක.");
 
+            // Add TV show title back for cleaner message/filename
+            details.title = selected.details.title + " - " + episode.title; 
+
             // Proceed to quality selection
             await sendQualityOptions(bot, from, m, details);
             
         } catch (err) {
-            return bot.sendMessage(from, { text: "❌ Episode Details දෝෂය: " + err.message });
+            return bot.sendMessage(from, { text: "❌ Episode Details දෝෂය: " + err.message }, { quoted: m });
         }
     }
 
     // --- STEP 3: SELECT QUALITY AND DOWNLOAD ---
     else if (selected.step === "select_quality") {
         const qualityOption = selected.downloadOptions[num - 1];
-        if (!qualityOption) return bot.sendMessage(from, { text: "❌ වලංගු නොවන Quality අංකයකි." });
+        if (!qualityOption) return bot.sendMessage(from, { text: "❌ වලංගු නොවන Quality අංකයකි." }, { quoted: m });
         stateMap.delete(from);
 
         const sizeGB = sizeToGB(qualityOption.size);
@@ -236,26 +270,3 @@ bot.ev.on("messages.upsert", async ({ messages }) => {
         }
     }
 });
-
-/**
- * Helper function to send quality selection message
- */
-async function sendQualityOptions(bot, from, m, details) {
-    const downloadOptions = details.download.filter(opt => opt.link);
-    if (downloadOptions.length === 0) {
-        return bot.sendMessage(from, { text: "❌ මෙම චිත්‍රපටය / කථාංගය සඳහා Download විකල්ප නොමැත." });
-    }
-
-    let qualityCaption = `*📥 ${details.title}*\n\n`;
-    downloadOptions.slice(0, 5).forEach((opt, i) => {
-        qualityCaption += `${i + 1}. *${opt.quality}* (${opt.size || 'N/A'})\n`;
-    });
-    qualityCaption += `\nඔබට අවශ්‍ය Quality එකේ අංකය Reply කරන්න.`;
-
-    const sent = await bot.sendMessage(from, {
-        image: { url: details.imageSrc || 'https://via.placeholder.com/300x450' },
-        caption: qualityCaption
-    }, { quoted: m });
-
-    stateMap.set(from, { step: "select_quality", details, downloadOptions, msgId: sent.key.id });
-}
