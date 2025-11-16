@@ -1,4 +1,4 @@
-Const l = console.log;
+const l = console.log; // Corrected: Used 'const' instead of 'Const'
 const config = require('../config'); // Bot configuration
 const { cmd } = require('../command'); // Command framework
 const axios = require('axios'); // HTTP client
@@ -134,7 +134,7 @@ cmd({
     'desc': 'Cinesubz interactive session handler',
     'doNotAdd': true // Prevents adding to help menu if applicable
 }, async (bot, m, context) => {
-    // Here, 'bot' is the first argument, so it is defined and accessible.
+    // 'bot' is defined here as the first argument received from the framework.
     
     const from = m.key.remoteJid;
     const ctx = m.message?.extendedTextMessage?.contextInfo;
