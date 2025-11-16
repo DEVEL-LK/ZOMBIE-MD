@@ -158,7 +158,7 @@ cmd({
                 const picks = [];
                 const availableQualities = {};
                 
-                // FIX 4 & 5: Correctly read 'link' field and apply strict direct download filter
+                // *** FIX 6: Remove the strict direct link filter to allow all links (including Pixeldrain) ***
                 for (let i = 0; i < downloadLinks.length; i++) {
                     const link = downloadLinks[i];
                     
@@ -166,14 +166,8 @@ cmd({
                     const size = link.size || 'N/A';
                     const directLink = link.link; 
                     
-                    // --- Looser Direct Link Filter (Prevents "No usable links" error) ---
-                    const isDirectDownload = directLink && (
-                        directLink.endsWith('.mp4') || 
-                        directLink.endsWith('.mkv') || 
-                        directLink.includes('download.mp4') || // Check for specific phrases in the URL
-                        directLink.includes('ddl.sinhalasub.net') || // Specific DLServer host
-                        directLink.includes('cdn.sinhalasub.net')   // Specific DLServer host
-                    );
+                    // --- Filter Removed: All links are allowed if directLink exists ---
+                    const isDirectDownload = directLink && true; 
                     
                     if (isDirectDownload) {
                         const qKey = quality.toUpperCase().replace(/\s/g, ''); 
@@ -198,7 +192,7 @@ cmd({
 
                 // Check if any links were successfully parsed
                 if (!picks.length) {
-                    await bot.sendMessage(from, { 'text': '❌ No usable direct download links found. The API provided links are not direct MP4/MKV files.' }, { 'quoted': incomingMessage });
+                    await bot.sendMessage(from, { 'text': '❌ No usable download links found in the API response data.' }, { 'quoted': incomingMessage });
                     return;
                 }
 
@@ -257,6 +251,7 @@ cmd({
                     }, { 'quoted': incomingMessage });
                     await bot.sendMessage(from, { 'react': { 'text': '✅', 'key': incomingMessage.key } });
                 } catch {
+                    // If download fails, send the direct URL to the user
                     await bot.sendMessage(from, { 'text': '❌ Failed to send file. Direct link:\n' + selectedQuality.direct_download }, { 'quoted': incomingMessage });
                 }
             }
