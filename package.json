@@ -1,12 +1,12 @@
 {
-  "name": "Queen_Ahinsa-MD",
-  "version": "1.0.0",
+  "name": "ZOMBIE-MD",
+  "version": "2.0.0",
   "description": "A WhatsApp bot created using Node.js",
   "main": "index.js",
   "scripts": {
-    "start": "pm2 start index.js --deep-monitoring --attach --name Queen_Ahinsa-MD",
-    "stop": "pm2 stop Queen_Ahinsa-MD",
-    "restart": "pm2 restart Queen_Ahinsa-MD"
+    "start": "pm2 start index.js --deep-monitoring --attach --name ZOMBIE-MD",
+    "stop": "pm2 stop ZOMBIE-MD",
+    "restart": "pm2 restart ZOMBIE-MD"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "6.7.8",
@@ -23,7 +23,6 @@
     "@ffmpeg-installer/ffmpeg": "^1.1.0",
     "@blackamda/telegram-image-url": "^1.0.0",
     "dark-yasiya-sinhalasub.lk": "1.0.1",
-    "pixaldrain-sinhalasub": "git+https://github.com/DarkMakerofc/pixaldrain-sinhalasub.git",
     "translate-google-api": "^1.0.4",
     "google-tts-api": "^2.0.2",
     "ruhend-scraper" : "7.0.6",
