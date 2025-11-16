@@ -1,267 +1,274 @@
-/*
- * NOTE: The original variable/function names are placeholders.
- * Actual names (like 'l' for console.log) are preserved where clear.
- * The string array lookup (_0x2ae8a6(xxx)) is replaced with the actual string.
+Const l = console.log;
+const config = require('../config'); // Bot configuration
+const { cmd } = require('../command'); // Command framework
+const axios = require('axios'); // HTTP client
+const NodeCache = require('node-cache'); // Cache
+
+// --- CINESUBZ API CONFIGURATION ---
+const API_KEY = "15d9dcfa502789d3290fd69cb2bdbb9ab919fab5969df73b0ee433206c58e05b";
+const BASE = "https://foreign-marna-sithaunarathnapromax-9a005c2e.koyeb.app/api/cinesubz";
+
+const SEARCH_ENDPOINT = `${BASE}/search`;
+const MOVIE_DETAILS_ENDPOINT = `${BASE}/movie-details`;
+const TVSHOW_DETAILS_ENDPOINT = `${BASE}/tvshow-details`;
+const EPISODE_DETAILS_ENDPOINT = `${BASE}/episode-details`;
+const DOWNLOAD_ENDPOINT = `${BASE}/downloadurl`; // Final download URL fetcher
+// ----------------------------------
+
+// Cache search results for 180 seconds
+const searchCache = new NodeCache({ 'stdTTL': 180, 'checkperiod': 60 });
+const stateMap = new Map(); // Map to hold interactive session data
+
+// ───── SIZE PARSER ─────────────────────────────
+function sizeToGB(str) {
+    if (!str) return 3; // Default to 3GB if size is unknown (too large)
+    let s = str.toUpperCase().replace(",", ".");
+    const match = s.match(/(\d+.?\d*)\s*(GB|MB)/);
+    if (!match) return 3;
+    const value = parseFloat(match[1]);
+    const unit = match[2];
+    if (unit === "GB") return value;
+    if (unit === "MB") return value / 1024;
+    return 3;
+}
+
+/**
+ * Helper function to send quality selection message
  */
+async function sendQualityOptions(bot, from, m, details) {
+    const downloadOptions = details.download.filter(opt => opt.link);
+    if (downloadOptions.length === 0) {
+        return bot.sendMessage(from, { text: "❌ මෙම චිත්‍රපටය / කථාංගය සඳහා Download විකල්ප නොමැත." });
+    }
 
-const l = console.log;
-const config = require('../config'); // Loads configuration
-const { cmd } = require('../command'); // Bot command framework
-const axios = require('axios'); // HTTP client for API calls
-const NodeCache = require('node-cache'); // Cache for search results
+    let qualityCaption = `*📥 ${details.title}*\n\n`;
+    downloadOptions.slice(0, 5).forEach((opt, i) => {
+        qualityCaption += `${i + 1}. *${opt.quality}* (${opt.size || 'N/A'})\n`;
+    });
+    qualityCaption += `\nඔබට අවශ්‍ය Quality එකේ අංකය Reply කරන්න.`;
 
-// --- NEW API CONFIGURATION ---
-const API_KEY = 'c56182a993f60b4f49cf97ab09886d17'; // Your API Key
-const SEARCH_API = 'https://sadaslk-apis.vercel.app/api/v1/movie/sinhalasub/search?';
-const MOVIE_DL_API = 'https://sadaslk-apis.vercel.app/api/v1/movie/sinhalasub/infodl?';
-const TV_DL_API = 'https://sadaslk-apis.vercel.app/api/v1/movie/sinhalasub/tv/dl?'; // Used for TV Episode DL
-// -----------------------------
+    const sent = await bot.sendMessage(from, {
+        image: { url: details.imageSrc || 'https://via.placeholder.com/300x450' },
+        caption: qualityCaption
+    }, { quoted: m });
 
-// Cache search results for 60 seconds (stdTTL: 0x3c)
-const searchCache = new NodeCache({ 'stdTTL': 60, 'checkperiod': 120 });
-const BRAND = config.MOVIE_FOOTER; // Likely a brand/footer string
+    // Ensure 'details' contains the necessary info for the final step
+    stateMap.set(from, { step: "select_quality", details: details, downloadOptions, msgId: sent.key.id });
+}
 
-// --- Main Command Definition ---
+
+// ───── MAIN COMMAND DEFINITION (Search) ─────────────────────────────
 cmd({
-    'pattern': 'sinhalasub',
+    'pattern': 'cinesubz',
     'react': '🎬',
-    'desc': 'Search and download Movies/TV Series',
+    'desc': 'Search and download Movies/TV Series from Cinesubz',
     'category': 'download',
     'filename': __filename
 }, async (bot, message, context, { from, q: searchQuery }) => {
     // 1. Handle No Search Query
     if (!searchQuery) {
         await bot.sendMessage(from, {
-            'text': '*💡 Type Your Movie ㋡*\n\n📋 Usage: .sinhalasub <search term>\n📝 Example: .sinhalasub Breaking Bad\n\n' + '*🎬 Movie / TV Series Search*'
+            'text': '*💡 භාවිතය: .cinesubz <Movie/TV-Show Name>*\n\n📝 උදාහරණ: .cinesubz Game of Thrones'
         }, { 'quoted': message });
         return;
     }
 
     try {
-        const cacheKey = 'film_' + searchQuery.toLowerCase().trim();
+        const cacheKey = 'cinesubz_search_' + searchQuery.toLowerCase().trim();
         let apiData = searchCache.get(cacheKey);
 
         // 2. Search Logic (API Call & Caching)
         if (!apiData) {
-            const searchUrl = `${SEARCH_API}q=${encodeURIComponent(searchQuery)}&apiKey=${API_KEY}`;
+            await bot.sendMessage(from, { 'text': '🔍 සෙවීම ආරම්භ කරයි...' }, { 'quoted': message });
+            const searchUrl = `${SEARCH_ENDPOINT}?apiKey=${API_KEY}&q=${encodeURIComponent(searchQuery)}`;
             
-            let retries = 3;
-            while (retries--) {
-                try {
-                    const response = await axios.get(searchUrl, { 'timeout': 10000 }); // 10s timeout
-                    apiData = response.data;
-                    break;
-                } catch (error) {
-                    if (!retries) throw new Error('❌ Fetch failed.');
-                    await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second before retry
-                }
-            }
+            const response = await axios.get(searchUrl, { 'timeout': 120000 });
+            apiData = response.data;
 
-            // FIX 1: Search API Response Check: Use 'data' instead of 'results'
-            if (!apiData?.status || !apiData?.data?.length) {
-                throw new Error('No results found.');
+            if (!apiData?.data?.length) {
+                throw new Error('❌ කිසිවක් සොයාගත නොහැක.');
             }
             searchCache.set(cacheKey, apiData);
         }
 
         // 3. Format Search Results for Display
-        // FIX 2: Search API Data Mapping: Use 'apiData.data' and correct field names
-        const results = apiData.data.map((item, index) => ({
+        const results = apiData.data.slice(0, 10).map((item, index) => ({
             'n': index + 1, 
-            'title': item.Title, 
-            'imdb': item.Rating || 'N/A', 
-            'year': item.Year || 'N/A', 
-            'link': item.Link, 
-            'image': item.Img
+            'title': item.title, 
+            'rating': item.rating || 'N/A', 
+            'year': item.year || 'N/A', 
+            'link': item.link, // Crucial for next step
+            'image': item.imageSrc || 'https://via.placeholder.com/300x450'
         }));
 
-        let replyText = '*🎬 SEARCH RESULTS*\n\n';
+        let replyText = '*🍿 Cinesubz සෙවුම් ප්‍රතිඵල*\n\n';
         for (const item of results) {
-            replyText += `🎬 *${item.n}. ${item.title}*\n  ⭐ Rating: ${item.imdb}\n  📅 Year: ${item.year}\n\n`;
+            replyText += `🎬 *${item.n}. ${item.title}* (${item.year})\n  ⭐ Rating: ${item.rating}\n\n`;
         }
-        replyText += '🔢 Select number 🪀';
+        replyText += 'තෝරාගැනීමට අංකය Reply කරන්න.';
 
         // 4. Send Results and Setup Interactive Listener
         const sentMessage = await bot.sendMessage(from, {
-            'image': { 'url': results[0].image }, // Use first result's thumbnail
+            'image': { 'url': results[0].image }, 
             'caption': replyText
         }, { 'quoted': message });
 
-        const stateMap = new Map();
-
-        // Listener for user's selection (reply to the message)
-        const selectionHandler = async ({ messages }) => {
-            const incomingMessage = messages?.[0];
-            if (!incomingMessage?.message?.extendedTextMessage) return;
-
-            const text = incomingMessage.message.extendedTextMessage.text.trim();
-            const quotedId = incomingMessage.message.extendedTextMessage.contextInfo?.stanzaId;
-            
-            if (text.toLowerCase() === 'off') {
-                bot.ev.off('messages.upsert', selectionHandler);
-                stateMap.clear();
-                await bot.sendMessage(from, { 'text': 'OK.' }, { 'quoted': incomingMessage });
-                return;
-            }
-
-            if (quotedId === sentMessage.key.id) {
-                // --- Movie Selection (First Stage) ---
-                const selectedFilm = results.find(item => item.n === parseInt(text));
-
-                if (!selectedFilm) {
-                    await bot.sendMessage(from, { 'text': '❌ Invalid number.' }, { 'quoted': incomingMessage });
-                    return;
-                }
-                
-                // Determine if it's a Movie or TV episode
-                const isTvEpisode = selectedFilm.link.includes('/episodes/');
-
-                // 5. Fetch Download Links
-                const dlBaseUrl = isTvEpisode ? TV_DL_API : MOVIE_DL_API;
-                const downloadUrl = `${dlBaseUrl}q=${encodeURIComponent(selectedFilm.link)}&apiKey=${API_KEY}`;
-
-                let downloadData;
-                let retries = 3;
-                while (retries--) {
-                    try {
-                        downloadData = (await axios.get(downloadUrl, { 'timeout': 10000 })).data;
-                        if (!downloadData.status) throw new Error();
-                        break;
-                    } catch {
-                        if (!retries) {
-                            await bot.sendMessage(from, { 'text': '❌ Error: Failed to retrieve data' }, { 'quoted': incomingMessage });
-                            return;
-                        }
-                        await new Promise(resolve => setTimeout(resolve, 1000));
-                    }
-                }
-
-                let downloadLinks = [];
-                let thumbnailUrl = selectedFilm.image;
-                
-                if (isTvEpisode) {
-                    // FIX 3a: TV DL Response. Filter for usable hosts and map finalDownloadUrl to 'link'
-                    downloadLinks = downloadData.data.filter(link => 
-                        link.finalDownloadUrl && (link.host === 'DLServer-01' || link.host === 'DLServer-02' || link.host === 'Usersdrive')
-                    ).map(link => ({
-                        'quality': link.quality,
-                        'size': 'N/A', 
-                        'link': link.finalDownloadUrl
-                    }));
-                } else {
-                    // FIX 3b: Movie DL Response uses 'downloadLinks' array
-                    downloadLinks = downloadData.data.downloadLinks;
-                    thumbnailUrl = downloadData.data.images?.[0] || selectedFilm.image; 
-                }
-
-                // 6. Filter & Format Available Quality Options
-                const picks = [];
-                const availableQualities = {};
-                
-                // *** FIX 6: Remove the strict direct link filter to allow all links (including Pixeldrain) ***
-                for (let i = 0; i < downloadLinks.length; i++) {
-                    const link = downloadLinks[i];
-                    
-                    const quality = link.quality;
-                    const size = link.size || 'N/A';
-                    const directLink = link.link; 
-                    
-                    // --- Filter Removed: All links are allowed if directLink exists ---
-                    const isDirectDownload = directLink && true; 
-                    
-                    if (isDirectDownload) {
-                        const qKey = quality.toUpperCase().replace(/\s/g, ''); 
-                        let priority = 0;
-                        if (qKey.includes('1080P') || qKey.includes('FHD')) priority = 3;
-                        else if (qKey.includes('720P') || qKey.includes('HD')) priority = 2;
-                        else if (qKey.includes('480P') || qKey.includes('SD')) priority = 1;
-
-                        if (!availableQualities[qKey] || availableQualities[qKey].priority < priority) {
-                            availableQualities[qKey] = { quality, size, direct_download: directLink, priority };
-                        }
-                    }
-                }
-                
-                const sortedPicks = Object.values(availableQualities)
-                    .sort((a, b) => b.priority - a.priority) 
-                    .slice(0, 5); 
-
-                for (let i = 0; i < sortedPicks.length; i++) {
-                    picks.push({ 'n': i + 1, ...sortedPicks[i] });
-                }
-
-                // Check if any links were successfully parsed
-                if (!picks.length) {
-                    await bot.sendMessage(from, { 'text': '❌ No usable download links found in the API response data.' }, { 'quoted': incomingMessage });
-                    return;
-                }
-
-                let qualityReply = `*🎬 ${selectedFilm.title}*\n\n📥 Choose Quality:\n\n`;
-                for (const pick of picks) {
-                    qualityReply += `${pick.n}. *${pick.quality}* • ${pick.size})\n`;
-                }
-                qualityReply += '\n*~https://whatsapp.com/channel/0029Vb5xFPHGE56jTnm4ZD2k~*';
-
-                // 7. Send Quality Selection Message
-                const qualityMessage = await bot.sendMessage(from, {
-                    'image': { 'url': thumbnailUrl },
-                    'caption': qualityReply
-                }, { 'quoted': incomingMessage });
-
-                // Store film and quality options for the next step
-                stateMap.set(qualityMessage.key.id, { 'film': selectedFilm, 'picks': picks });
-                return;
-            }
-
-            // --- Quality Selection (Second Stage) ---
-            if (stateMap.has(quotedId)) {
-                const { film, picks } = stateMap.get(quotedId);
-                const selectedQuality = picks.find(item => item.n === parseInt(text));
-
-                if (!selectedQuality) {
-                    await bot.sendMessage(from, { 'text': '❌ Wrong quality.' }, { 'quoted': incomingMessage });
-                    return;
-                }
-
-                // 8. Size Check (Limit downloads to 2GB or less)
-                const sizeLower = selectedQuality.size ? selectedQuality.size.toLowerCase() : '0mb';
-                
-                let sizeInGB = 3; 
-                if (sizeLower.includes('gb')) {
-                    sizeInGB = parseFloat(sizeLower) || 3;
-                } else if (sizeLower.includes('mb')) {
-                    sizeInGB = (parseFloat(sizeLower) || 0) / 1024;
-                }
-                
-                if (sizeInGB > 2) { 
-                    await bot.sendMessage(from, { 'text': `⚠️ Too large (${selectedQuality.size}). Direct link:\n` + selectedQuality.direct_download }, { 'quoted': incomingMessage });
-                    return;
-                }
-
-                // 9. Prepare and Send File
-                const safeTitle = film.title.replace(/[\\/:*?"<>|]/g, '');
-                const fileName = `🎥 ${safeTitle}.${selectedQuality.quality || 'DL'}.mp4`;
-
-                try {
-                    await bot.sendMessage(from, {
-                        'document': { 'url': selectedQuality.direct_download },
-                        'mimetype': 'video/mp4',
-                        'fileName': fileName,
-                        'caption': `*🎬 ${film.title}*\n*📊 Quality: ${selectedQuality.quality} • Size: ${selectedQuality.size || 'N/A'}\n\n${config.MOVIE_FOOTER}`
-                    }, { 'quoted': incomingMessage });
-                    await bot.sendMessage(from, { 'react': { 'text': '✅', 'key': incomingMessage.key } });
-                } catch {
-                    // If download fails, send the direct URL to the user
-                    await bot.sendMessage(from, { 'text': '❌ Failed to send file. Direct link:\n' + selectedQuality.direct_download }, { 'quoted': incomingMessage });
-                }
-            }
-        };
-        
-        // Start listening for the user's reply
-        bot.ev.on('messages.upsert', selectionHandler);
+        // Setup the state for the next step (Movie Selection)
+        stateMap.set(from, {
+            step: "select_movie",
+            list: results,
+            msgId: sentMessage.key.id
+        });
 
     } catch (error) {
         l(error);
-        await bot.sendMessage(from, { 'text': '❌ Error: ' + error.message }, { 'quoted': message });
+        await bot.sendMessage(from, { 'text': '❌ සෙවීමේ දෝෂය: ' + error.message }, { 'quoted': message });
+    }
+});
+
+
+// ───── REPLY HANDLER DEFINITION (Replaced bot.ev.on) ─────────────
+// This command acts as the listener for replies to the cinesubz search result.
+// It is typically registered to run on every message if certain conditions are met,
+// which is how some frameworks handle interactive sessions.
+cmd({
+    'pattern': '', // An empty pattern usually means it runs on every message
+    'desc': 'Cinesubz interactive session handler',
+    'doNotAdd': true // Prevents adding to help menu if applicable
+}, async (bot, m, context) => {
+    const from = m.key.remoteJid;
+    const ctx = m.message?.extendedTextMessage?.contextInfo;
+    const text = (m.message.conversation || m.message.extendedTextMessage?.text || "").trim();
+    const selected = stateMap.get(from);
+
+    // Only proceed if an active session exists
+    if (!selected) return;
+    
+    // Check if the reply is to the bot's last message for this session
+    const isReply = ctx?.quotedMessage?.stanzaId === selected.msgId || ctx?.stanzaId === selected.msgId;
+    if (!isReply) return;
+    
+    // Check for "off" command to clear session
+    if (text.toLowerCase() === 'off') {
+        stateMap.delete(from);
+        return bot.sendMessage(from, { text: 'OK. සෙවුම අවලංගු කරන ලදී.' }, { quoted: m });
+    }
+
+    const num = parseInt(text);
+    if (isNaN(num)) return; // Ignore non-numeric replies
+
+    // --- STEP 1: SELECT MOVIE / TV SHOW ---
+    if (selected.step === "select_movie") {
+        const movie = selected.list[num - 1];
+        if (!movie) return bot.sendMessage(from, { text: "❌ වලංගු නොවන අංකයකි." }, { quoted: m });
+        stateMap.delete(from); // Clear temporary selection list
+
+        try {
+            await bot.sendMessage(from, { react: { text: "⏳", key: m.key } });
+            const link = movie.link;
+            let detailsEndpoint;
+            let isTvshow = link.includes('/tvshows/');
+            
+            if (isTvshow) {
+                detailsEndpoint = TVSHOW_DETAILS_ENDPOINT;
+            } else {
+                detailsEndpoint = MOVIE_DETAILS_ENDPOINT;
+            }
+
+            const r = await axios.get(`${detailsEndpoint}?apiKey=${API_KEY}&url=${encodeURIComponent(link)}`, { timeout: 120000 });
+            const details = r.data;
+            if (!details.title) throw new Error("විස්තර ලබා ගැනීමට නොහැක.");
+
+            let detailsCaption = `*🎬 ${details.title}*\n\n`;
+            detailsCaption += `⭐ IMDb Rating: ${details.rating || 'N/A'}\n`;
+            detailsCaption += `📅 Release: ${details.year || movie.year || 'N/A'}\n`;
+            detailsCaption += `🎭 Genres: ${(details.genres || []).join(', ') || 'N/A'}\n\n`;
+            detailsCaption += `📜 Summary:\n${(details.summary || details.description || movie.summary || "N/A").substring(0, 350)}...\n\n`;
+
+            const hasEpisodes = isTvshow && details.episodes?.length > 0;
+            
+            if (hasEpisodes) {
+                // --- TV SHOW: SELECT EPISODE ---
+                detailsCaption += `📺 *Available Episodes:*\n`;
+                details.episodes.slice(0, 5).forEach((ep, i) => {
+                    detailsCaption += `${i + 1}. ${ep.title}\n`;
+                });
+                detailsCaption += `\nEpisode එකක් තේරීමට අංකය Reply කරන්න.`;
+                const sent2 = await bot.sendMessage(from, { image: { url: details.imageSrc || movie.imageSrc }, caption: detailsCaption }, { quoted: m });
+                // We keep the full details object here for context in the next step
+                stateMap.set(from, { step: "select_episode", details, episodes: details.episodes.slice(0, 5), msgId: sent2.key.id });
+            } else {
+                // --- MOVIE: PROCEED TO DOWNLOAD QUALITY ---
+                if (!details.download?.length) throw new Error("Download විකල්ප නොමැත.");
+                await sendQualityOptions(bot, from, m, details);
+            }
+        } catch (err) {
+            // Re-map the error to 'm' for proper quoting
+            return bot.sendMessage(from, { text: "❌ දෝෂය: " + err.message }, { quoted: m });
+        }
+    }
+
+    // --- STEP 2: SELECT EPISODE (For TV Shows) ---
+    else if (selected.step === "select_episode") {
+        const episode = selected.episodes[num - 1];
+        if (!episode) return bot.sendMessage(from, { text: "❌ වලංගු නොවන Episode අංකයකි." }, { quoted: m });
+        stateMap.delete(from);
+
+        try {
+            await bot.sendMessage(from, { react: { text: "⏳", key: m.key } });
+            // Get episode details to find download options
+            const r = await axios.get(`${EPISODE_DETAILS_ENDPOINT}?apiKey=${API_KEY}&url=${encodeURIComponent(episode.link)}`, { timeout: 120000 });
+            const details = r.data;
+            if (!details.download?.length) throw new Error("Download විස්තර ලබා ගැනීමට නොහැක.");
+
+            // Add TV show title back for cleaner message/filename
+            details.title = selected.details.title + " - " + episode.title; 
+
+            // Proceed to quality selection
+            await sendQualityOptions(bot, from, m, details);
+            
+        } catch (err) {
+            return bot.sendMessage(from, { text: "❌ Episode Details දෝෂය: " + err.message }, { quoted: m });
+        }
+    }
+
+    // --- STEP 3: SELECT QUALITY AND DOWNLOAD ---
+    else if (selected.step === "select_quality") {
+        const qualityOption = selected.downloadOptions[num - 1];
+        if (!qualityOption) return bot.sendMessage(from, { text: "❌ වලංගු නොවන Quality අංකයකි." }, { quoted: m });
+        stateMap.delete(from);
+
+        const sizeGB = sizeToGB(qualityOption.size);
+        if (sizeGB > 2) {
+            // If file is too large, send the intermediate link for browser download
+            return bot.sendMessage(from, { text: `⚠️ ගොනුව විශාල වැඩිය (>${sizeGB.toFixed(2)} GB). \n\nඔබට පහත සබැඳිය browser එකකින් විවෘත කර බාගත කළ හැක:\n${qualityOption.link}` }, { quoted: m });
+        }
+
+        try {
+            await bot.sendMessage(from, { react: { text: "📥", key: m.key } });
+            
+            // --- FETCH FINAL DOWNLOAD URL ---
+            const r = await axios.get(`${DOWNLOAD_ENDPOINT}?apiKey=${API_KEY}&url=${encodeURIComponent(qualityOption.link)}`, { timeout: 120000 });
+            const finalUrl = r.data.url;
+
+            if (!finalUrl) throw new Error("Download Link එක ලබා ගැනීමට නොහැක.");
+            
+            // --- SEND FILE ---
+            const title = selected.details.title || 'Movie/Episode';
+            const caption = `*✅ සාර්ථකයි*\n\n🎬 Title: ${title}\n📊 Quality: ${qualityOption.quality} (${qualityOption.size})\n\n${config.MOVIE_FOOTER}`;
+            const fileName = `${title.replace(/[^a-zA-Z0-9\s]/g, '_')}_${qualityOption.quality}.mp4`;
+
+            await bot.sendMessage(from, {
+                document: { url: finalUrl },
+                mimetype: 'video/mp4',
+                fileName: fileName,
+                caption: caption
+            }, { quoted: m });
+
+        } catch (err) {
+            console.error(err);
+            // If final download fails, send the intermediate link
+            return bot.sendMessage(from, { text: `❌ ගොනුව යැවීමේ දෝෂයකි. (Error: ${err.message}). ඔබට Link එක browser එකකින් භාවිතා කළ හැක:\n\n${qualityOption.link}` }, { quoted: m });
+        }
     }
 });
