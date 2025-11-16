@@ -1,4 +1,4 @@
-const l = console.log; // Corrected: Used 'const' instead of 'Const'
+const l = console.log; // Syntax Error Fixed: 'const' used instead of 'Const'
 const config = require('../config'); // Bot configuration
 const { cmd } = require('../command'); // Command framework
 const axios = require('axios'); // HTTP client
@@ -127,26 +127,31 @@ cmd({
 });
 
 
-// ───── REPLY HANDLER DEFINITION (bot.ev.on වෙනුවට) ─────────────
-// This command acts as the listener for replies to handle the interactive session.
+// ───── REPLY HANDLER DEFINITION (Reply Listener) ─────────────
 cmd({
-    'pattern': '', // An empty pattern runs on every message in many frameworks
+    'pattern': '', 
     'desc': 'Cinesubz interactive session handler',
-    'doNotAdd': true // Prevents adding to help menu if applicable
+    'doNotAdd': true 
 }, async (bot, m, context) => {
-    // 'bot' is defined here as the first argument received from the framework.
+    // 'bot' is defined here.
     
     const from = m.key.remoteJid;
     const ctx = m.message?.extendedTextMessage?.contextInfo;
-    const text = (m.message.conversation || m.message.extendedTextMessage?.text || "").trim();
+    
+    // Get the text from conversation or extendedTextMessage
+    const text = (m.message?.conversation || m.message?.extendedTextMessage?.text || "").trim();
+    
     const selected = stateMap.get(from);
 
-    // Only proceed if an active session exists
+    // 1. Only proceed if an active session exists
     if (!selected) return;
     
-    // Check if the reply is to the bot's last message for this session
-    const isReply = ctx?.quotedMessage?.stanzaId === selected.msgId; // Simplified check
-    if (!isReply) return;
+    // 2. ❗ IMPROVED REPLY CHECK ❗
+    // Check if contextInfo and quotedMessage exist AND if the quoted message's ID matches the stored message ID.
+    const isReply = (ctx && ctx.quotedMessage) 
+                    && (ctx.quotedMessage.stanzaId === selected.msgId);
+    
+    if (!isReply) return; // If it's not a reply to the bot's specific message, exit.
     
     // Check for "off" command to clear session
     if (text.toLowerCase() === 'off') {
