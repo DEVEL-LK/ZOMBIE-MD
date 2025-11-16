@@ -1,4 +1,4 @@
-const l = console.log; // Corrected: Used 'const' instead of 'Const'
+const l = console.log;
 const config = require('../config'); // Bot configuration
 const { cmd } = require('../command'); // Command framework
 const axios = require('axios'); // HTTP client
@@ -52,7 +52,6 @@ async function sendQualityOptions(bot, from, m, details) {
         caption: qualityCaption
     }, { quoted: m });
 
-    // Ensure 'details' contains the necessary info for the final step
     stateMap.set(from, { step: "select_quality", details: details, downloadOptions, msgId: sent.key.id });
 }
 
@@ -133,12 +132,9 @@ cmd({
     'desc': 'Cinesubz interactive session handler',
     'doNotAdd': true 
 }, async (bot, m, context) => {
-    // 'bot' is defined here as an argument.
     
     const from = m.key.remoteJid;
     const ctx = m.message?.extendedTextMessage?.contextInfo;
-    
-    // Get the text from conversation or extendedTextMessage
     const text = (m.message?.conversation || m.message?.extendedTextMessage?.text || "").trim();
     
     const selected = stateMap.get(from);
@@ -146,12 +142,18 @@ cmd({
     // 1. Only proceed if an active session exists
     if (!selected) return;
     
-    // 2. IMPROVED REPLY CHECK: Check if contextInfo and quotedMessage exist AND if the quoted message's ID matches the stored message ID.
-    const isReply = (ctx && ctx.quotedMessage) 
-                    && (ctx.quotedMessage.stanzaId === selected.msgId);
+    // 2. FINAL SIMPLIFIED REPLY CHECK: Check if the message is a reply to the one we sent.
+    if (!ctx?.quotedMessage) return; // Must be a reply
+
+    // Check if the ID of the message being replied to matches the ID we stored.
+    // Use either stanzaId (the message ID of the quoted message) or the quotedMessage's ID
+    const quotedMessageId = ctx.stanzaId || ctx.quotedMessage.stanzaId; 
     
-    if (!isReply) return; // If it's not a reply to the bot's specific message, exit.
-    
+    if (quotedMessageId !== selected.msgId) {
+        return; 
+    }
+    // ---------------------------------------------------
+
     // Check for "off" command to clear session
     if (text.toLowerCase() === 'off') {
         stateMap.delete(from);
@@ -208,8 +210,8 @@ cmd({
                 await sendQualityOptions(bot, from, m, details);
             }
         } catch (err) {
-            l(err); // Log the error to your console
-            // Report a specific error message back to the user
+            l(err); 
+            // If an error occurs, send an error message instead of remaining silent
             return bot.sendMessage(from, { text: "❌ විස්තර ලබා ගැනීමේ දෝෂයකි: " + (err.message || "API Timeout") }, { quoted: m });
         }
     }
