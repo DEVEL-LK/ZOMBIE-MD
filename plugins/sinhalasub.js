@@ -57,7 +57,7 @@ cmd({
                 }
             }
 
-            // *** CHANGE 1: API Response Check: Use 'data' instead of 'results' ***
+            // *** FIX 1: Search API Response Check: Use 'data' instead of 'results' ***
             if (!apiData?.status || !apiData?.data?.length) {
                 throw new Error('No results found.');
             }
@@ -65,13 +65,13 @@ cmd({
         }
 
         // 3. Format Search Results for Display
-        // *** CHANGE 2: API Data Mapping: Use 'apiData.data' ***
+        // *** FIX 2: Search API Data Mapping: Use 'apiData.data' and correct field names ***
         const results = apiData.data.map((item, index) => ({
-            'n': index + 1, // Use index + 1 as original 'No' may not be sequential
+            'n': index + 1, 
             'title': item.Title, // Use 'Title'
             'imdb': item.Rating || 'N/A', // Use 'Rating' for IMDB/Rating
             'year': item.Year || 'N/A', // Use 'Year'
-            'link': item.Link, // Use 'Link'
+            'link': item.Link, // Use 'Link' - Crucial for next step
             'image': item.Img // Use 'Img' for thumbnail
         }));
 
@@ -87,7 +87,7 @@ cmd({
             'caption': replyText
         }, { 'quoted': message });
 
-        const stateMap = new Map(); // Used to store film/picks data for the next step
+        const stateMap = new Map();
 
         // Listener for user's selection (reply to the message)
         const selectionHandler = async ({ messages }) => {
@@ -113,7 +113,7 @@ cmd({
                     return;
                 }
                 
-                // Determine if it's a Movie or TV series (based on link containing '/episodes/' or not)
+                // Determine if it's a Movie or TV episode
                 const isTvEpisode = selectedFilm.link.includes('/episodes/');
 
                 // 5. Fetch Download Links
@@ -140,33 +140,32 @@ cmd({
                 let thumbnailUrl = selectedFilm.image;
                 
                 if (isTvEpisode) {
-                    // *** TV DL Response is an array of objects ***
+                    // *** FIX 3a: TV DL Response is an array of objects. Map finalDownloadUrl to 'link' ***
                     downloadLinks = downloadData.data.filter(link => 
                         link.finalDownloadUrl && (link.host === 'DLServer-01' || link.host === 'DLServer-02' || link.host === 'Usersdrive')
                     ).map(link => ({
                         'quality': link.quality,
-                        'size': 'N/A', // Size is not available directly in this response
-                        'direct_download': link.finalDownloadUrl
+                        'size': 'N/A', 
+                        'link': link.finalDownloadUrl // Use 'link' key for consistency
                     }));
+                    // Note: If you need TV info (thumbnail/title) before episode DL, you need another API call (info).
                 } else {
-                    // *** Movie DL Response is an object with 'downloadLinks' array ***
+                    // *** FIX 3b: Movie DL Response uses 'downloadLinks' array ***
                     downloadLinks = downloadData.data.downloadLinks;
-                    thumbnailUrl = downloadData.data.images?.[0] || selectedFilm.image; // Use first image from list
+                    thumbnailUrl = downloadData.data.images?.[0] || selectedFilm.image; 
                 }
 
                 // 6. Filter & Format Available Quality Options
                 const picks = [];
-                // Group links by quality and prioritize higher resolutions
                 const availableQualities = {};
                 
-                // *** CHANGE 3: Adapt key names for download links ***
+                // *** FIX 4: Correctly read 'link' field from download object and map to 'direct_download' ***
                 for (let i = 0; i < downloadLinks.length; i++) {
                     const link = downloadLinks[i];
                     
                     const quality = link.quality;
                     const size = link.size || 'N/A';
-                    // Movie DL: uses 'link'. TV DL: uses 'finalDownloadUrl' (mapped to 'direct_download' above)
-                    const directLink = link.link || link.direct_download; 
+                    const directLink = link.link; // 'link' is used for both Movie DL and TV DL (after mapping)
                     
                     if (directLink) {
                         const qKey = quality.toUpperCase().replace(/\s/g, ''); 
@@ -175,14 +174,12 @@ cmd({
                         else if (qKey.includes('720P') || qKey.includes('HD')) priority = 2;
                         else if (qKey.includes('480P') || qKey.includes('SD')) priority = 1;
 
-                        // Only take the highest quality version of each quality type
                         if (!availableQualities[qKey] || availableQualities[qKey].priority < priority) {
                             availableQualities[qKey] = { quality, size, direct_download: directLink, priority };
                         }
                     }
                 }
                 
-                // Assign numbered picks (1, 2, 3...) based on priority/order
                 const sortedPicks = Object.values(availableQualities)
                     .sort((a, b) => b.priority - a.priority) 
                     .slice(0, 5); 
@@ -191,8 +188,9 @@ cmd({
                     picks.push({ 'n': i + 1, ...sortedPicks[i] });
                 }
 
+                // *** Check if any links were successfully parsed ***
                 if (!picks.length) {
-                    await bot.sendMessage(from, { 'text': '❌ No direct download links found from DLServer/Usersdrive.' }, { 'quoted': incomingMessage });
+                    await bot.sendMessage(from, { 'text': '❌ No usable direct download links found from selected hosts.' }, { 'quoted': incomingMessage });
                     return;
                 }
 
@@ -226,7 +224,7 @@ cmd({
                 // 8. Size Check (Limit downloads to 2GB or less)
                 const sizeLower = selectedQuality.size ? selectedQuality.size.toLowerCase() : '0mb';
                 
-                let sizeInGB = 3; // Default to 'too large' if size is unknown
+                let sizeInGB = 3; 
                 if (sizeLower.includes('gb')) {
                     sizeInGB = parseFloat(sizeLower) || 3;
                 } else if (sizeLower.includes('mb')) {
