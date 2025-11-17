@@ -1,20 +1,19 @@
 const l = console.log;
-const config = require('../config'); // Bot configuration (Assuming you have this)
-const { cmd } = require('../command'); // Command framework (Assuming you have this)
+const config = require('../config'); // Bot configuration
+const { cmd } = require('../command'); // Command framework
 const axios = require('axios'); // HTTP client
 const NodeCache = require('node-cache'); // Cache
 
-// --- CINERU API CONFIGURATION (UPDATED ENDPOINTS) ---
+// --- CINERU API CONFIGURATION ---
 const API_KEY = "25f974dba76310042bcd3c9488eec9093816ef32eb36d34c1b6b875ac9215932";
 const BASE_URL = "https://foreign-marna-sithaunarathnapromax-9a005c2e.koyeb.app/api/cineru";
 
-// Endpoints updated to reflect the new API structure (e.g., /movie, /tvshow)
 const SEARCH_ENDPOINT = `${BASE_URL}/search`; 
 const MOVIE_DETAILS_ENDPOINT = `${BASE_URL}/movie`; 
 const TVSHOW_DETAILS_ENDPOINT = `${BASE_URL}/tvshow`; 
 const EPISODE_DETAILS_ENDPOINT = `${BASE_URL}/episode`; 
 const DOWNLOAD_ENDPOINT = `${BASE_URL}/downloadurl`; 
-// ----------------------------------------------------
+// --------------------------------
 
 // Cache search results for 180 seconds
 const searchCache = new NodeCache({ 'stdTTL': 180, 'checkperiod': 60 });
@@ -75,42 +74,49 @@ cmd({
 
     try {
         const cacheKey = 'cineru_search_' + searchQuery.toLowerCase().trim();
-        let apiData = searchCache.get(cacheKey);
+        // Cache එකෙන් ගන්නේ apiData.data.data ව්‍යුහය පමණි.
+        let apiData = searchCache.get(cacheKey); 
 
         // 2. Search Logic (API Call & Caching)
         if (!apiData) {
             await bot.sendMessage(from, { 'text': '🔍 සෙවීම ආරම්භ කරයි...' }, { 'quoted': message });
             
-            // Search URL construction: /search?query=...&apiKey=...
             const searchUrl = `${SEARCH_ENDPOINT}?query=${encodeURIComponent(searchQuery)}&apiKey=${API_KEY}`;
             
             const response = await axios.get(searchUrl, { 'timeout': 120000 });
-            apiData = response.data;
+            const fullApiResponse = response.data; // සම්පූර්ණ ප්‍රතිචාරය
+            
+            // 🛑 නිවැරදි කිරීම: ප්‍රතිඵල ඇත්තේ fullApiResponse.data.data යටතේ බැවින්
+            apiData = fullApiResponse.data?.data; 
 
             // --- DEBUGGING LINE ---
-            l("API Response Data for Search:", apiData); 
+            l("API Response Data for Search:", fullApiResponse);
+            l("Extracted Result Data (apiData):", apiData); 
             // ----------------------
             
-            if (!apiData?.data?.length) {
-                // If API returns no data, throw the error
-                throw new Error('❌ කිසිවක් සොයාගත නොහැක.'); 
+            // පරීක්ෂා කරන්නේ apiData තුළ ඇති .data array එකේ දිග
+            if (!apiData?.data?.length) { 
+                throw new Error('❌ කිසිවක් සොයාගත නොහැක.');
             }
             searchCache.set(cacheKey, apiData);
         }
 
         // 3. Format Search Results for Display
+        // apiData යනු { datalength: X, data: [...] } වන නිසා, data array එකට යන්නේ apiData.data මගිනි.
         const results = apiData.data.slice(0, 10).map((item, index) => ({
             'n': index + 1, 
             'title': item.title, 
             'rating': item.rating || 'N/A', 
-            'year': item.year || 'N/A', 
-            'link': item.link, // Crucial for next step
-            'image': item.imageSrc || 'https://via.placeholder.com/300x450'
+            'year': item.date ? new Date(item.date).getFullYear() : 'N/A', // 📅 Date format handle
+            'link': item.link, 
+            'image': item.image || 'https://via.placeholder.com/300x450'
         }));
-
+        
+        // ... (ඉතිරි කේතය නොවෙනස්ව)
+        
         let replyText = '*🍿 Cineru සෙවුම් ප්‍රතිඵල*\n\n';
         for (const item of results) {
-            replyText += `🎬 *${item.n}. ${item.title}* (${item.year})\n  ⭐ Rating: ${item.rating}\n\n`;
+            replyText += `🎬 *${item.n}. ${item.title}* (${item.year})\n\n`;
         }
         replyText += 'තෝරාගැනීමට අංකය Reply කරන්න.\n(අවලංගු කිරීමට \'off\' යොදන්න.)';
 
@@ -120,7 +126,6 @@ cmd({
             'caption': replyText
         }, { 'quoted': message });
 
-        // Setup the state for the next step (Movie Selection)
         stateMap.set(from, {
             step: "select_movie",
             list: results,
@@ -180,7 +185,6 @@ cmd({
 
             const link = movie.link;
             let detailsEndpoint;
-            // Check link to determine if it's a TV show or Movie
             let isTvshow = link.includes('/tv-series/') || link.includes('/tvshows/');
             
             if (isTvshow) {
@@ -268,7 +272,6 @@ cmd({
             await bot.sendMessage(from, { react: { text: "📥", key: m.key } });
             
             // --- FETCH FINAL DOWNLOAD URL ---
-            // Download URL construction: /downloadurl?apiKey=...&url=...
             const url = `${DOWNLOAD_ENDPOINT}?apiKey=${API_KEY}&url=${encodeURIComponent(finalUrlLink)}`;
             const r = await axios.get(url, { timeout: 120000 });
             const finalUrl = r.data.url; 
