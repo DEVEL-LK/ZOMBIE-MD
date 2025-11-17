@@ -20,6 +20,11 @@ const searchCache = new NodeCache({ 'stdTTL': 180, 'checkperiod': 60 });
 const stateMap = new Map(); // Map to hold interactive session data
 
 // ───── SIZE PARSER ─────────────────────────────
+/**
+ * Converts size string (e.g., "1.2 GB") to gigabytes.
+ * @param {string} str - Size string.
+ * @returns {number} Size in GB or 3 (default if unknown/too large).
+ */
 function sizeToGB(str) {
     if (!str) return 3; // Default to 3GB if size is unknown (too large)
     let s = str.toUpperCase().replace(",", ".");
@@ -45,7 +50,7 @@ async function sendQualityOptions(bot, from, m, details) {
     downloadOptions.slice(0, 5).forEach((opt, i) => {
         qualityCaption += `${i + 1}. *${opt.quality}* (${opt.size || 'N/A'})\n`;
     });
-    qualityCaption += `\nඔබට අවශ්‍ය Quality එකේ අංකය Reply කරන්න.`;
+    qualityCaption += `\nඔබට අවශ්‍ය Quality එකේ අංකය Reply කරන්න.\n(අවලංගු කිරීමට 'off' යොදන්න.)`;
 
     const sent = await bot.sendMessage(from, {
         image: { url: details.imageSrc || 'https://via.placeholder.com/300x450' },
@@ -104,7 +109,7 @@ cmd({
         for (const item of results) {
             replyText += `🎬 *${item.n}. ${item.title}* (${item.year})\n  ⭐ Rating: ${item.rating}\n\n`;
         }
-        replyText += 'තෝරාගැනීමට අංකය Reply කරන්න.';
+        replyText += 'තෝරාගැනීමට අංකය Reply කරන්න.\n(අවලංගු කිරීමට \'off\' යොදන්න.)';
 
         // 4. Send Results and Setup Interactive Listener
         const sentMessage = await bot.sendMessage(from, {
@@ -116,7 +121,7 @@ cmd({
         stateMap.set(from, {
             step: "select_movie",
             list: results,
-            msgId: sentMessage.key.id
+            msgId: sentMessage.key.id // <-- මෙය Reply එකක් identify කිරීමට භාවිතා වේ.
         });
 
     } catch (error) {
@@ -142,12 +147,12 @@ cmd({
     // 1. Only proceed if an active session exists
     if (!selected) return;
     
-    // 2. FINAL SIMPLIFIED REPLY CHECK: Check if the message is a reply to the one we sent.
+    // 2. REPLY CHECK: Check if the message is a reply to the one we sent.
     if (!ctx?.quotedMessage) return; // Must be a reply
 
-    // Check if the ID of the message being replied to matches the ID we stored.
-    // Use either stanzaId (the message ID of the quoted message) or the quotedMessage's ID
-    const quotedMessageId = ctx.stanzaId || ctx.quotedMessage.stanzaId; 
+    // *** ID GAlApeema Sadaha Wenas Kara Athi KotaSa ***
+    // Use the stored message ID (selected.msgId) and compare it against the ID of the quoted message (ctx.stanzaId)
+    const quotedMessageId = ctx.stanzaId; 
     
     if (quotedMessageId !== selected.msgId) {
         return; 
@@ -201,7 +206,7 @@ cmd({
                 details.episodes.slice(0, 5).forEach((ep, i) => {
                     detailsCaption += `${i + 1}. ${ep.title}\n`;
                 });
-                detailsCaption += `\nEpisode එකක් තේරීමට අංකය Reply කරන්න.`;
+                detailsCaption += `\nEpisode එකක් තේරීමට අංකය Reply කරන්න.\n(අවලංගු කිරීමට 'off' යොදන්න.)`;
                 const sent2 = await bot.sendMessage(from, { image: { url: details.imageSrc || movie.imageSrc }, caption: detailsCaption }, { quoted: m });
                 stateMap.set(from, { step: "select_episode", details, episodes: details.episodes.slice(0, 5), msgId: sent2.key.id });
             } else {
@@ -248,7 +253,8 @@ cmd({
         stateMap.delete(from);
 
         const sizeGB = sizeToGB(qualityOption.size);
-        if (sizeGB > 2) {
+        // Size Limit is 2GB for direct sending
+        if (sizeGB > 2) { 
             // If file is too large, send the intermediate link for browser download
             return bot.sendMessage(from, { text: `⚠️ ගොනුව විශාල වැඩිය (>${sizeGB.toFixed(2)} GB). \n\nඔබට පහත සබැඳිය browser එකකින් විවෘත කර බාගත කළ හැක:\n${qualityOption.link}` }, { quoted: m });
         }
