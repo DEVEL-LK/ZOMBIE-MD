@@ -4,28 +4,23 @@ const { cmd } = require('../command'); // Command framework
 const axios = require('axios'); // HTTP client
 const NodeCache = require('node-cache'); // Cache
 
-// --- CINERU API CONFIGURATION ---
-const API_KEY = "25f974dba76310042bcd3c9488eec9093816ef32eb36d34c1b6b875ac9215932"; // නව API යතුර
-const BASE_URL = "https://foreign-marna-sithaunarathnapromax-9a005c2e.koyeb.app/api/cineru"; // නව Base URL
+// --- CINERU API CONFIGURATION (UPDATED ENDPOINTS) ---
+const API_KEY = "25f974dba76310042bcd3c9488eec9093816ef32eb36d34c1b6b875ac9215932";
+const BASE_URL = "https://foreign-marna-sithaunarathnapromax-9a005c2e.koyeb.app/api/cineru";
 
-const SEARCH_ENDPOINT = `${BASE_URL}/search`;
-const MOVIE_DETAILS_ENDPOINT = `${BASE_URL}/movie-details`;
-const TVSHOW_DETAILS_ENDPOINT = `${BASE_URL}/tvshow-details`;
-const EPISODE_DETAILS_ENDPOINT = `${BASE_URL}/episode-details`;
+// UPDATED: Endpoints now include the parameter name to match the API structure
+const SEARCH_ENDPOINT = `${BASE_URL}/search`; 
+const MOVIE_DETAILS_ENDPOINT = `${BASE_URL}/movie`; // Changed from /movie-details
+const TVSHOW_DETAILS_ENDPOINT = `${BASE_URL}/tvshow`; // Changed from /tvshow-details
+const EPISODE_DETAILS_ENDPOINT = `${BASE_URL}/episode`; // Assuming /episode is the correct path for episode details
 const DOWNLOAD_ENDPOINT = `${BASE_URL}/downloadurl`; // Final download URL fetcher
-// ----------------------------------
+// ----------------------------------------------------
 
 // Cache search results for 180 seconds
 const searchCache = new NodeCache({ 'stdTTL': 180, 'checkperiod': 60 });
 const stateMap = new Map(); // Map to hold interactive session data
 
 // ───── SIZE PARSER ─────────────────────────────
-/**
- * Converts size string (e.g., "1.2 GB") to gigabytes.
- * Default size limit for sending is 2GB.
- * @param {string} str - Size string.
- * @returns {number} Size in GB or 3 (default if unknown/too large).
- */
 function sizeToGB(str) {
     if (!str) return 3;
     let s = str.toUpperCase().replace(",", ".");
@@ -86,8 +81,8 @@ cmd({
         if (!apiData) {
             await bot.sendMessage(from, { 'text': '🔍 සෙවීම ආරම්භ කරයි...' }, { 'quoted': message });
             
-            // Cineru Search API call (using apiKey query parameter)
-            const searchUrl = `${SEARCH_ENDPOINT}?apiKey=${API_KEY}&q=${encodeURIComponent(searchQuery)}`;
+            // Search URL construction is now: /search?query=...&apiKey=...
+            const searchUrl = `${SEARCH_ENDPOINT}?query=${encodeURIComponent(searchQuery)}&apiKey=${API_KEY}`;
             
             const response = await axios.get(searchUrl, { 'timeout': 120000 });
             apiData = response.data;
@@ -181,16 +176,17 @@ cmd({
 
             const link = movie.link;
             let detailsEndpoint;
-            let isTvshow = link.includes('/tvshows/');
+            let isTvshow = link.includes('/tv-series/') || link.includes('/tvshows/');
             
+            // Note: API link structure suggests /movie and /tvshow
             if (isTvshow) {
                 detailsEndpoint = TVSHOW_DETAILS_ENDPOINT;
             } else {
                 detailsEndpoint = MOVIE_DETAILS_ENDPOINT;
             }
 
-            // API Call for details
-            const url = `${detailsEndpoint}?apiKey=${API_KEY}&url=${encodeURIComponent(link)}`;
+            // API Call for details is now: /movie?url=...&apiKey=...
+            const url = `${detailsEndpoint}?url=${encodeURIComponent(link)}&apiKey=${API_KEY}`;
             const r = await axios.get(url, { timeout: 120000 });
             const details = r.data;
             if (!details.title) throw new Error("විස්තර ලබා ගැනීමට නොහැක.");
@@ -231,8 +227,9 @@ cmd({
 
         try {
             await bot.sendMessage(from, { react: { text: "⏳", key: m.key } });
-            // Get episode details to find download options
-            const url = `${EPISODE_DETAILS_ENDPOINT}?apiKey=${API_KEY}&url=${encodeURIComponent(episode.link)}`;
+            
+            // Get episode details is now: /episode?url=...&apiKey=...
+            const url = `${EPISODE_DETAILS_ENDPOINT}?url=${encodeURIComponent(episode.link)}&apiKey=${API_KEY}`;
             const r = await axios.get(url, { timeout: 120000 });
             const details = r.data;
             if (!details.download?.length) throw new Error("Download විස්තර ලබා ගැනීමට නොහැක.");
@@ -260,17 +257,17 @@ cmd({
 
         // Size Limit is 2GB for direct sending
         if (sizeGB > 2) { 
-            // If file is too large, send the intermediate link for browser download
             return bot.sendMessage(from, { text: `⚠️ ගොනුව විශාල වැඩිය (>${sizeGB.toFixed(2)} GB). \n\nඔබට පහත සබැඳිය browser එකකින් විවෘත කර බාගත කළ හැක:\n${finalUrlLink}` }, { quoted: m });
         }
 
         try {
             await bot.sendMessage(from, { react: { text: "📥", key: m.key } });
             
-            // --- FETCH FINAL DOWNLOAD URL (API requirement) ---
+            // --- FETCH FINAL DOWNLOAD URL ---
+            // Download URL endpoint structure remains the same: /downloadurl?apiKey=...&url=...
             const url = `${DOWNLOAD_ENDPOINT}?apiKey=${API_KEY}&url=${encodeURIComponent(finalUrlLink)}`;
             const r = await axios.get(url, { timeout: 120000 });
-            const finalUrl = r.data.url; // Final download link
+            const finalUrl = r.data.url; 
 
             if (!finalUrl) throw new Error("Download Link එක ලබා ගැනීමට නොහැක.");
             
@@ -291,7 +288,6 @@ cmd({
 
         } catch (err) {
             l(err);
-            // If final download fails, send the intermediate link
             return bot.sendMessage(from, { text: `❌ ගොනුව යැවීමේ දෝෂයකි. (Error: ${err.message}). ඔබට Link එක browser එකකින් භාවිතා කළ හැක:\n\n${finalUrlLink}` }, { quoted: m });
         }
     }
