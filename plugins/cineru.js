@@ -1,6 +1,6 @@
 const l = console.log;
-const config = require('../config'); // Bot configuration
-const { cmd } = require('../command'); // Command framework
+const config = require('../config'); // Bot configuration (Assuming you have this)
+const { cmd } = require('../command'); // Command framework (Assuming you have this)
 const axios = require('axios'); // HTTP client
 const NodeCache = require('node-cache'); // Cache
 
@@ -8,12 +8,12 @@ const NodeCache = require('node-cache'); // Cache
 const API_KEY = "25f974dba76310042bcd3c9488eec9093816ef32eb36d34c1b6b875ac9215932";
 const BASE_URL = "https://foreign-marna-sithaunarathnapromax-9a005c2e.koyeb.app/api/cineru";
 
-// UPDATED: Endpoints now include the parameter name to match the API structure
+// Endpoints updated to reflect the new API structure (e.g., /movie, /tvshow)
 const SEARCH_ENDPOINT = `${BASE_URL}/search`; 
-const MOVIE_DETAILS_ENDPOINT = `${BASE_URL}/movie`; // Changed from /movie-details
-const TVSHOW_DETAILS_ENDPOINT = `${BASE_URL}/tvshow`; // Changed from /tvshow-details
-const EPISODE_DETAILS_ENDPOINT = `${BASE_URL}/episode`; // Assuming /episode is the correct path for episode details
-const DOWNLOAD_ENDPOINT = `${BASE_URL}/downloadurl`; // Final download URL fetcher
+const MOVIE_DETAILS_ENDPOINT = `${BASE_URL}/movie`; 
+const TVSHOW_DETAILS_ENDPOINT = `${BASE_URL}/tvshow`; 
+const EPISODE_DETAILS_ENDPOINT = `${BASE_URL}/episode`; 
+const DOWNLOAD_ENDPOINT = `${BASE_URL}/downloadurl`; 
 // ----------------------------------------------------
 
 // Cache search results for 180 seconds
@@ -81,14 +81,19 @@ cmd({
         if (!apiData) {
             await bot.sendMessage(from, { 'text': '🔍 සෙවීම ආරම්භ කරයි...' }, { 'quoted': message });
             
-            // Search URL construction is now: /search?query=...&apiKey=...
+            // Search URL construction: /search?query=...&apiKey=...
             const searchUrl = `${SEARCH_ENDPOINT}?query=${encodeURIComponent(searchQuery)}&apiKey=${API_KEY}`;
             
             const response = await axios.get(searchUrl, { 'timeout': 120000 });
             apiData = response.data;
 
+            // --- DEBUGGING LINE ---
+            l("API Response Data for Search:", apiData); 
+            // ----------------------
+            
             if (!apiData?.data?.length) {
-                throw new Error('❌ කිසිවක් සොයාගත නොහැක.');
+                // If API returns no data, throw the error
+                throw new Error('❌ කිසිවක් සොයාගත නොහැක.'); 
             }
             searchCache.set(cacheKey, apiData);
         }
@@ -123,8 +128,8 @@ cmd({
         });
 
     } catch (error) {
-        l(error);
-        await bot.sendMessage(from, { 'text': '❌ සෙවීමේ දෝෂය: ' + (error.response?.data?.message || error.message) }, { 'quoted': message });
+        l("Search Error:", error);
+        await bot.sendMessage(from, { 'text': '❌ සෙවීමේ දෝෂය: ' + (error.message || "API Timeout") }, { 'quoted': message });
     }
 });
 
@@ -148,7 +153,6 @@ cmd({
     // 2. REPLY CHECK: Must be a reply and the ID must match the stored message ID
     if (!ctx?.quotedMessage) return; 
 
-    // Use stanzaId (the ID of the message being replied to)
     const quotedMessageId = ctx.stanzaId; 
     
     if (quotedMessageId !== selected.msgId) {
@@ -172,20 +176,20 @@ cmd({
         
         try {
             await bot.sendMessage(from, { react: { text: "⏳", key: m.key } });
-            stateMap.delete(from); // Clear state after successful reaction
+            stateMap.delete(from); 
 
             const link = movie.link;
             let detailsEndpoint;
+            // Check link to determine if it's a TV show or Movie
             let isTvshow = link.includes('/tv-series/') || link.includes('/tvshows/');
             
-            // Note: API link structure suggests /movie and /tvshow
             if (isTvshow) {
                 detailsEndpoint = TVSHOW_DETAILS_ENDPOINT;
             } else {
                 detailsEndpoint = MOVIE_DETAILS_ENDPOINT;
             }
 
-            // API Call for details is now: /movie?url=...&apiKey=...
+            // Details URL construction: /movie?url=...&apiKey=... or /tvshow?url=...&apiKey=...
             const url = `${detailsEndpoint}?url=${encodeURIComponent(link)}&apiKey=${API_KEY}`;
             const r = await axios.get(url, { timeout: 120000 });
             const details = r.data;
@@ -214,7 +218,7 @@ cmd({
                 await sendQualityOptions(bot, from, m, details);
             }
         } catch (err) {
-            l(err); 
+            l("Details Error:", err); 
             return bot.sendMessage(from, { text: "❌ විස්තර ලබා ගැනීමේ දෝෂයකි: " + (err.message || "API Timeout") }, { quoted: m });
         }
     }
@@ -228,7 +232,7 @@ cmd({
         try {
             await bot.sendMessage(from, { react: { text: "⏳", key: m.key } });
             
-            // Get episode details is now: /episode?url=...&apiKey=...
+            // Episode Details URL construction: /episode?url=...&apiKey=...
             const url = `${EPISODE_DETAILS_ENDPOINT}?url=${encodeURIComponent(episode.link)}&apiKey=${API_KEY}`;
             const r = await axios.get(url, { timeout: 120000 });
             const details = r.data;
@@ -241,7 +245,7 @@ cmd({
             await sendQualityOptions(bot, from, m, details);
             
         } catch (err) {
-            l(err);
+            l("Episode Details Error:", err);
             return bot.sendMessage(from, { text: "❌ Episode Details දෝෂය: " + (err.message || "API Timeout") }, { quoted: m });
         }
     }
@@ -264,7 +268,7 @@ cmd({
             await bot.sendMessage(from, { react: { text: "📥", key: m.key } });
             
             // --- FETCH FINAL DOWNLOAD URL ---
-            // Download URL endpoint structure remains the same: /downloadurl?apiKey=...&url=...
+            // Download URL construction: /downloadurl?apiKey=...&url=...
             const url = `${DOWNLOAD_ENDPOINT}?apiKey=${API_KEY}&url=${encodeURIComponent(finalUrlLink)}`;
             const r = await axios.get(url, { timeout: 120000 });
             const finalUrl = r.data.url; 
@@ -287,7 +291,7 @@ cmd({
             }, { quoted: m });
 
         } catch (err) {
-            l(err);
+            l("Download File Error:", err);
             return bot.sendMessage(from, { text: `❌ ගොනුව යැවීමේ දෝෂයකි. (Error: ${err.message}). ඔබට Link එක browser එකකින් භාවිතා කළ හැක:\n\n${finalUrlLink}` }, { quoted: m });
         }
     }
