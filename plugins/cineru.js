@@ -8,13 +8,16 @@ const l = console.log;
 const config = require('../config'); // Loads configuration
 const { cmd } = require('../command'); // Bot command framework
 const axios = require('axios'); // HTTP client for API calls
-const NodeCache = require('node-cache'); // Cache for search results
+const NodeCache = new require('node-cache'); // Cache for search results
 
-// --- NEW API CONFIGURATION ---
-const API_KEY = '25f974dba76310042bcd3c9488eec9093816ef32eb36d34c1b6b875ac9215932'; // Your API Key
-const SEARCH_API = 'https://foreign-marna-sithaunarathnapromax-9a005c2e.koyeb.app/api/cineru/search?';
-const MOVIE_INFO_API = 'https://foreign-marna-sithaunarathnapromax-9a005c2e.koyeb.app/api/cineru/movie?';
-const TV_DL_API = 'https://foreign-marna-sithaunarathnapromax-9a005c2e.koyeb.app/api/cineru/tvshow?'; // Used for TV Episode DL
+// --- REPLACED API CONFIGURATION (Using Cineru API) ---
+const API_KEY = '25f974dba76310042bcd3c9488eec9093816ef32eb36d34c1b6b875ac9215932'; // New API Key from your request
+const BASE_URL = 'https://foreign-marna-sithaunarathnapromax-9a005c2e.koyeb.app/api/cineru/';
+
+const SEARCH_API = `${BASE_URL}search?`;
+// The movie and TV APIs share the same structure but use different endpoints, hence the different names here:
+const MOVIE_DL_API = `${BASE_URL}movie?`; // Used for Movie and Episode DL (based on your request structure)
+const TV_DL_API = `${BASE_URL}tvshow?`; // Used for TV Show Detail (based on your request structure)
 // -----------------------------
 
 // Cache search results for 60 seconds (stdTTL: 0x3c)
@@ -23,7 +26,7 @@ const BRAND = config.MOVIE_FOOTER; // Likely a brand/footer string
 
 // --- Main Command Definition ---
 cmd({
-    'pattern': 'cineru',
+    'pattern': 'sinhalasub',
     'react': '🎬',
     'desc': 'Search and download Movies/TV Series',
     'category': 'download',
@@ -32,7 +35,7 @@ cmd({
     // 1. Handle No Search Query
     if (!searchQuery) {
         await bot.sendMessage(from, {
-            'text': '*💡 Type Your Movie ㋡*\n\n📋 Usage: .cineru <search term>\n📝 Example: .cineru Breaking Bad\n\n' + '*🎬 Movie / TV Series Search*'
+            'text': '*💡 Type Your Movie ㋡*\n\n📋 Usage: .sinhalasub <search term>\n📝 Example: .sinhalasub Breaking Bad\n\n' + '*🎬 Movie / TV Series Search*'
         }, { 'quoted': message });
         return;
     }
@@ -43,7 +46,7 @@ cmd({
 
         // 2. Search Logic (API Call & Caching)
         if (!apiData) {
-            const searchUrl = `${SEARCH_API}q=${encodeURIComponent(searchQuery)}&apiKey=${API_KEY}`;
+            const searchUrl = `${SEARCH_API}query=${encodeURIComponent(searchQuery)}&apiKey=${API_KEY}`;
             
             let retries = 3;
             while (retries--) {
@@ -57,22 +60,22 @@ cmd({
                 }
             }
 
-            // FIX 1: Search API Response Check: Use 'data' instead of 'results'
-            if (!apiData?.status || !apiData?.data?.length) {
+            // FIX 1: Search API Response Check: Use 'results' instead of 'data' for Cineru API
+            if (!apiData?.status || !apiData?.results?.length) {
                 throw new Error('No results found.');
             }
             searchCache.set(cacheKey, apiData);
         }
 
         // 3. Format Search Results for Display
-        // FIX 2: Search API Data Mapping: Use 'apiData.data' and correct field names
-        const results = apiData.data.map((item, index) => ({
+        // FIX 2: Search API Data Mapping: Use 'apiData.results' and correct field names
+        const results = apiData.results.map((item, index) => ({
             'n': index + 1, 
-            'title': item.Title, 
-            'imdb': item.Rating || 'N/A', 
-            'year': item.Year || 'N/A', 
-            'link': item.Link, 
-            'image': item.Img
+            'title': item.title, 
+            'imdb': item.rating || 'N/A', 
+            'year': item.year || 'N/A', 
+            'link': item.url, // Cineru uses 'url'
+            'image': item.image // Cineru uses 'image'
         }));
 
         let replyText = '*🎬 SEARCH RESULTS*\n\n';
@@ -113,12 +116,11 @@ cmd({
                     return;
                 }
                 
-                // Determine if it's a Movie or TV episode
-                const isTvEpisode = selectedFilm.link.includes('/episodes/');
-
-                // 5. Fetch Download Links
-                const dlBaseUrl = isTvEpisode ? TV_DL_API : MOVIE_DL_API;
-                const downloadUrl = `${dlBaseUrl}q=${encodeURIComponent(selectedFilm.link)}&apiKey=${API_KEY}`;
+                // Determine which API endpoint to use
+                // The Cineru API uses the same 'movie' endpoint for both single movies and individual episodes. 
+                // We will default to MOVIE_DL_API for the download links, as the TV_DL_API is usually for season lists.
+                const dlBaseUrl = MOVIE_DL_API; 
+                const downloadUrl = `${dlBaseUrl}url=${encodeURIComponent(selectedFilm.link)}&apiKey=${API_KEY}`;
 
                 let downloadData;
                 let retries = 3;
@@ -127,7 +129,8 @@ cmd({
                         downloadData = (await axios.get(downloadUrl, { 'timeout': 10000 })).data;
                         if (!downloadData.status) throw new Error();
                         break;
-                    } catch {
+                    } catch(e) {
+                        l('Download API error:', e.message); // Log the error for debugging
                         if (!retries) {
                             await bot.sendMessage(from, { 'text': '❌ Error: Failed to retrieve data' }, { 'quoted': incomingMessage });
                             return;
@@ -139,34 +142,37 @@ cmd({
                 let downloadLinks = [];
                 let thumbnailUrl = selectedFilm.image;
                 
-                if (isTvEpisode) {
-                    // FIX 3a: TV DL Response. Filter for usable hosts and map finalDownloadUrl to 'link'
-                    downloadLinks = downloadData.data.filter(link => 
-                        link.finalDownloadUrl && (link.host === 'DLServer-01' || link.host === 'DLServer-02' || link.host === 'Usersdrive')
-                    ).map(link => ({
-                        'quality': link.quality,
-                        'size': 'N/A', 
-                        'link': link.finalDownloadUrl
-                    }));
-                } else {
-                    // FIX 3b: Movie DL Response uses 'downloadLinks' array
+                // FIX 3: Cineru Movie/Episode DL Response Structure
+                if (downloadData.data && Array.isArray(downloadData.data.downloadLinks)) {
                     downloadLinks = downloadData.data.downloadLinks;
-                    thumbnailUrl = downloadData.data.images?.[0] || selectedFilm.image; 
+                    thumbnailUrl = downloadData.data.image || selectedFilm.image; 
+                } else if (downloadData.data && Array.isArray(downloadData.data.episodes)) {
+                     // Fallback for TV Show detail page which might contain episode links (though TV_DL_API is usually better)
+                     // Since we used MOVIE_DL_API for detail, if it's a TV link, it might return episode details or season details. 
+                     // We stick to the 'downloadLinks' structure for simplicity, assuming the Cineru API returns them in the detail response for the given URL.
+                     // If the search result was a link to an individual episode, downloadLinks will be populated above.
+                     // If it's a TV show main link, this part needs more robust logic (e.g., fetching TV_DL_API then asking for season/episode).
+                     // For now, let's assume the initial link is directly to a downloadable entity or the downloadLinks are present.
+                    await bot.sendMessage(from, { 'text': '⚠️ Selected item is a TV series main page. Please search for individual episodes to get direct links.' }, { 'quoted': incomingMessage });
+                    return;
+                } else {
+                    await bot.sendMessage(from, { 'text': '❌ Could not parse download data from the API response.' }, { 'quoted': incomingMessage });
+                    return;
                 }
+
 
                 // 6. Filter & Format Available Quality Options
                 const picks = [];
                 const availableQualities = {};
                 
-                // *** FIX 6: Remove the strict direct link filter to allow all links (including Pixeldrain) ***
+                // *** Filter Logic: Uses 'url' for the direct link (as per the Cineru API structure) ***
                 for (let i = 0; i < downloadLinks.length; i++) {
                     const link = downloadLinks[i];
                     
                     const quality = link.quality;
                     const size = link.size || 'N/A';
-                    const directLink = link.link; 
+                    const directLink = link.url; // Cineru uses 'url' for the direct download link
                     
-                    // --- Filter Removed: All links are allowed if directLink exists ---
                     const isDirectDownload = directLink && true; 
                     
                     if (isDirectDownload) {
@@ -250,7 +256,8 @@ cmd({
                         'caption': `*🎬 ${film.title}*\n*📊 Quality: ${selectedQuality.quality} • Size: ${selectedQuality.size || 'N/A'}\n\n${config.MOVIE_FOOTER}`
                     }, { 'quoted': incomingMessage });
                     await bot.sendMessage(from, { 'react': { 'text': '✅', 'key': incomingMessage.key } });
-                } catch {
+                } catch(e) {
+                     l('File send error:', e.message); // Log the error for debugging
                     // If download fails, send the direct URL to the user
                     await bot.sendMessage(from, { 'text': '❌ Failed to send file. Direct link:\n' + selectedQuality.direct_download }, { 'quoted': incomingMessage });
                 }
