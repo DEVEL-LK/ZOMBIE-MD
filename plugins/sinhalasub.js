@@ -61,7 +61,7 @@ cmd({
                 }
             }
 
-            // [FIX]: Check if the main 'searchData' or the nested 'data' array is missing/empty.
+            // Check for results (using the 'data' structure)
             if (!searchData || !searchData.data || searchData.data.length === 0) { 
                 throw new Error('No results found.');
             }
@@ -70,7 +70,6 @@ cmd({
         }
 
         // 3. Process and display results
-        // [FIX]: Map from the 'data' array.
         const searchResults = searchData.data.map((item, index) => ({
             n: index + 1,
             title: item.title,
@@ -86,11 +85,17 @@ cmd({
         }
         responseText += '🔢 Select number 🪀';
 
-        // Send the search results message (with the first result's image)
-        const searchMessage = await conn.sendMessage(from, {
-            image: { url: searchResults[0].image },
-            caption: responseText
-        }, { quoted: message });
+        // [--- නිවැරදි කරන ලද කොටස ---]
+        let messageOptions = { caption: responseText };
+
+        // 🖼️ Error එක මඟහැරීමට image URL එකක් ඇත්දැයි පරීක්ෂා කිරීම.
+        if (searchResults[0] && searchResults[0].image) {
+            messageOptions.image = { url: searchResults[0].image };
+        }
+        
+        // Send the search results message (Line 90 පමණ)
+        const searchMessage = await conn.sendMessage(from, messageOptions, { quoted: message });
+        // [---------------------------]
 
         // 4. Set up listener for follow-up message (Movie Selection)
         const messageHandler = async ({ messages: newMessages }) => {
