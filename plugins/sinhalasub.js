@@ -70,14 +70,17 @@ cmd({
         }
 
         // 3. Process and display results
+        // [--- නිවැරදි කිරීම: ප්‍රතිඵලවල field names නිවැරදිව ලබා ගැනීම ---]
         const searchResults = searchData.data.map((item, index) => ({
             n: index + 1,
-            title: item.title,
-            imdb: item.imdb,
-            year: item.year,
+            // Most likely field names for the new API:
+            title: item.name || item.title,      // Title property
+            imdb: item.rating || item.imdb,      // Rating property
+            year: item.release_year || item.year, // Year property
             link: item.link, 
             image: item.image 
         }));
+        // [--------------------------------------------------------]
 
         let responseText = '*🎬 SEARCH RESULTS*\n\n';
         for (const result of searchResults) {
@@ -85,24 +88,21 @@ cmd({
         }
         responseText += '🔢 Select number 🪀';
 
-        // [--- නිවැරදි කරන ලද කොටස: Invalid media type දෝෂය මඟ හැරීම ---]
+        // [--- Image Error Handling Block ---]
         let messageOptions = { caption: responseText };
         let searchMessage;
 
-        // 🖼️ Error එක මඟහැරීමට image URL එකක් ඇත්දැයි පරීක්ෂා කිරීම සහ try-catch යෙදීම.
         if (searchResults[0] && searchResults[0].image) {
             messageOptions.image = { url: searchResults[0].image };
         }
         
         try {
-            // Send the search results message (Line 90 පමණ)
             searchMessage = await conn.sendMessage(from, messageOptions, { quoted: message });
         } catch (e) {
             log('Image Send Error, sending as text', e);
-            // If media sending fails (Invalid media type), send the results as a plain text message instead.
             searchMessage = await conn.sendMessage(from, { text: responseText }, { quoted: message });
         }
-        // [---------------------------]
+        // [----------------------------------]
 
         // 4. Set up listener for follow-up message (Movie Selection)
         const messageHandler = async ({ messages: newMessages }) => {
