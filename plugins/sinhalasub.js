@@ -7,15 +7,11 @@ const axios = require('axios');
 const NodeCache = require('node-cache');
 
 // --- API Configuration ---
-// ඔබ ලබා දුන් නව API URLs
 const API_BASE = 'https://sadaslk-apis.vercel.app/api/v1/movie/sinhalasub/';
 const API_KEY = 'c56182a993f60b4f49cf97ab09886d17';
 const SEARCH_API = `${API_BASE}search?apiKey=${API_KEY}&q=`; // Search API
 const DOWNLOAD_API = `${API_BASE}infodl?apiKey=${API_KEY}&q=`; // Movie/Info DL API
-// TV API එක දැනට කමාන්ඩ් එකේ භාවිතා නොවේ
-// const TV_DOWNLOAD_API = `${API_BASE}tv/dl?apiKey=${API_KEY}&q=`; 
 
-// Cache for search results (TTL: 60 seconds)
 const searchCache = new NodeCache({ 'stdTTL': 60, 'checkperiod': 120 });
 const BRAND = '' + config.MOVIE_FOOTER;
 const downloadOptionsMap = new Map();
@@ -30,10 +26,10 @@ cmd({
     category: 'download',
     filename: __filename
 }, async (
-    conn,           // Connection object (WhatsApp client)
-    message,        // Message object from the user
-    match,          // Command argument match
-    { from, q: searchQuery } // Destructured: 'from' (chat ID), 'q' (query string)
+    conn,           
+    message,        
+    match,          
+    { from, q: searchQuery } 
 ) => {
     // 1. Check for search query
     if (!searchQuery) {
@@ -52,7 +48,6 @@ cmd({
 
         // 2. Search for the movie/series (or fetch from cache)
         if (!searchData) {
-            // නව Search API Endpoint එක භාවිතය
             const apiUrl = SEARCH_API + encodeURIComponent(searchQuery); 
             let retries = 3;
             while (retries--) {
@@ -66,8 +61,8 @@ cmd({
                 }
             }
 
-            // නව API ප්‍රතිචාරයේ ඇති දත්ත වලට අනුකූලව චෙක් කිරීම.
-            if (!searchData?.status || !searchData.data?.length) { 
+            // [වැදගත් වෙනස්කම 1]: 'data' වෙනුවට 'results' යොදා ඇත (API Structure එකට අනුව නිවැරදි කිරීමට)
+            if (!searchData?.status || !searchData.results?.length) { 
                 throw new Error('No results found.');
             }
 
@@ -75,8 +70,8 @@ cmd({
         }
 
         // 3. Process and display results
-        // නව API ප්‍රතිචාරයේ data array එක භාවිතය
-        const searchResults = searchData.data.map((item, index) => ({
+        // [වැදගත් වෙනස්කම 2]: 'data' වෙනුවට 'results' යොදා ඇත
+        const searchResults = searchData.results.map((item, index) => ({
             n: index + 1,
             title: item.title,
             imdb: item.imdb,
@@ -101,7 +96,6 @@ cmd({
         const messageHandler = async ({ messages: newMessages }) => {
             const incomingMessage = newMessages?.[0];
             
-            // Check if it's a valid text message
             if (!incomingMessage?.message?.extendedTextMessage?.text) return;
             
             const messageText = incomingMessage.message.extendedTextMessage.text.trim();
@@ -131,7 +125,7 @@ cmd({
                     return;
                 }
 
-                // නව Download API Endpoint එක භාවිතය (Info/DL)
+                // Download API Call (Info/DL)
                 const downloadApiUrl = DOWNLOAD_API + encodeURIComponent(selectedFilm.link);
                 let downloadData, retries = 3;
 
@@ -149,12 +143,12 @@ cmd({
                     }
                 }
 
+                // Get download links from the new API structure
                 const downloadLinks = downloadData.data.download_links; 
                 const qualityPicks = [];
                 
-                // SD 480p සොයයි
+                // Find SD and HD options
                 const sdOption = downloadLinks.find(item => item.quality.includes('480p') && item.direct_download);
-                // HD 720p හෝ FHD 1080p සොයයි
                 const hdOption = downloadLinks.find(item => item.quality.includes('1080p') && item.direct_download) ||
                                  downloadLinks.find(item => item.quality.includes('720p') && item.direct_download);
 
