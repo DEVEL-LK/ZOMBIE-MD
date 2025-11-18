@@ -6,13 +6,20 @@ const { cmd } = require('../command');
 const axios = require('axios');
 const NodeCache = require('node-cache');
 
+// --- API Configuration ---
+// ඔබ ලබා දුන් නව API URLs
+const API_BASE = 'https://sadaslk-apis.vercel.app/api/v1/movie/sinhalasub/';
+const API_KEY = 'c56182a993f60b4f49cf97ab09886d17';
+const SEARCH_API = `${API_BASE}search?apiKey=${API_KEY}&q=`; // Search API
+const DOWNLOAD_API = `${API_BASE}infodl?apiKey=${API_KEY}&q=`; // Movie/Info DL API
+// TV API එක දැනට කමාන්ඩ් එකේ භාවිතා නොවේ
+// const TV_DOWNLOAD_API = `${API_BASE}tv/dl?apiKey=${API_KEY}&q=`; 
+
 // Cache for search results (TTL: 60 seconds)
 const searchCache = new NodeCache({ 'stdTTL': 60, 'checkperiod': 120 });
 const BRAND = '' + config.MOVIE_FOOTER;
-
-// Map to temporarily store download options after a movie is selected
-// Key: Message ID of the quality selection message
 const downloadOptionsMap = new Map();
+
 
 // --- Command Definition ---
 
@@ -25,7 +32,7 @@ cmd({
 }, async (
     conn,           // Connection object (WhatsApp client)
     message,        // Message object from the user
-    match,          // Command argument match (not used directly here)
+    match,          // Command argument match
     { from, q: searchQuery } // Destructured: 'from' (chat ID), 'q' (query string)
 ) => {
     // 1. Check for search query
@@ -45,36 +52,37 @@ cmd({
 
         // 2. Search for the movie/series (or fetch from cache)
         if (!searchData) {
-            const apiUrl = 'https://apis.davidcyriltech.my.id/movies/search?query=' + encodeURIComponent(searchQuery);
+            // නව Search API Endpoint එක භාවිතය
+            const apiUrl = SEARCH_API + encodeURIComponent(searchQuery); 
             let retries = 3;
             while (retries--) {
                 try {
-                    const response = await axios.get(apiUrl, { 'timeout': 10000 }); // 10s timeout
+                    const response = await axios.get(apiUrl, { 'timeout': 10000 });
                     searchData = response.data;
                     break;
                 } catch (error) {
                     if (!retries) throw new Error('Failed to retrieve data');
-                    await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second before retrying
+                    await new Promise(resolve => setTimeout(resolve, 1000));
                 }
             }
 
-            // Check if results are valid
-            if (!searchData?.status || !searchData.results?.length) {
+            // නව API ප්‍රතිචාරයේ ඇති දත්ත වලට අනුකූලව චෙක් කිරීම.
+            if (!searchData?.status || !searchData.data?.length) { 
                 throw new Error('No results found.');
             }
 
-            // Cache the successful results
             searchCache.set(cacheKey, searchData);
         }
 
         // 3. Process and display results
-        const searchResults = searchData.results.map((item, index) => ({
+        // නව API ප්‍රතිචාරයේ data array එක භාවිතය
+        const searchResults = searchData.data.map((item, index) => ({
             n: index + 1,
             title: item.title,
             imdb: item.imdb,
             year: item.year,
-            link: item.link,
-            image: item.thumbnail
+            link: item.link, 
+            image: item.image 
         }));
 
         let responseText = '*🎬 SEARCH RESULTS*\n\n';
@@ -83,7 +91,7 @@ cmd({
         }
         responseText += '🔢 Select number 🪀';
 
-        // Send the search results message (with the first result's thumbnail)
+        // Send the search results message (with the first result's image)
         const searchMessage = await conn.sendMessage(from, {
             image: { url: searchResults[0].image },
             caption: responseText
@@ -99,10 +107,10 @@ cmd({
             const messageText = incomingMessage.message.extendedTextMessage.text.trim();
             const quotedMessageId = incomingMessage.message.extendedTextMessage.contextInfo?.stanzaId;
 
-            // Handle 'off' command to stop listening (optional feature)
+            // Handle 'off' command
             if (messageText.toLowerCase() === 'off') {
-                conn.ev.off('messages.upsert', messageHandler); // Turn off the listener
-                downloadOptionsMap.clear(); // Clear any pending download options
+                conn.ev.off('messages.upsert', messageHandler); 
+                downloadOptionsMap.clear(); 
                 await conn.sendMessage(from, { text: 'OK.' }, { quoted: incomingMessage });
                 return;
             }
@@ -123,8 +131,8 @@ cmd({
                     return;
                 }
 
-                // Call the download link API
-                const downloadApiUrl = 'https://apis.davidcyriltech.my.id/movies/download?url=' + encodeURIComponent(selectedFilm.link);
+                // නව Download API Endpoint එක භාවිතය (Info/DL)
+                const downloadApiUrl = DOWNLOAD_API + encodeURIComponent(selectedFilm.link);
                 let downloadData, retries = 3;
 
                 while (retries--) {
@@ -141,13 +149,14 @@ cmd({
                     }
                 }
 
-                const downloadLinks = downloadData.download_links.download_links;
+                const downloadLinks = downloadData.data.download_links; 
                 const qualityPicks = [];
-
-                // Find best SD and HD options (prioritizing 1080p, then 720p)
-                const sdOption = downloadLinks.find(item => item.quality === 'SD 480p' && item.direct_download);
-                const hdOption = downloadLinks.find(item => item.quality === 'FHD 1080p' && item.direct_download) ||
-                                 downloadLinks.find(item => item.quality === 'HD 720p' && item.direct_download);
+                
+                // SD 480p සොයයි
+                const sdOption = downloadLinks.find(item => item.quality.includes('480p') && item.direct_download);
+                // HD 720p හෝ FHD 1080p සොයයි
+                const hdOption = downloadLinks.find(item => item.quality.includes('1080p') && item.direct_download) ||
+                                 downloadLinks.find(item => item.quality.includes('720p') && item.direct_download);
 
                 if (sdOption) qualityPicks.push({ n: 1, q: 'SD', ...sdOption });
                 if (hdOption) qualityPicks.push({ n: 2, q: 'HD', ...hdOption });
@@ -160,13 +169,13 @@ cmd({
                 // Format the quality selection message
                 let qualityText = `*🎬 ${selectedFilm.title}*\n\n📥 Choose Quality:\n\n`;
                 for (const pick of qualityPicks) {
-                    qualityText += `${pick.n}. *${pick.q}* (📊 Size: ${pick.size})\n`;
+                    qualityText += `${pick.n}. *${pick.q}* (${pick.quality}) (📊 Size: ${pick.size})\n`;
                 }
-                qualityText += '\n*~https://whatsapp.com/channel/0029Vb5xFPHGE56jTnm4ZD2k~*'; // Original Footer Link
+                qualityText += '\n*~https://whatsapp.com/channel/0029Vb5xFPHGE56jTnm4ZD2k~*';
 
                 // Send quality selection message
                 const qualityMessage = await conn.sendMessage(from, {
-                    image: { url: downloadData.download_links.image || selectedFilm.image },
+                    image: { url: downloadData.data.image || selectedFilm.image }, 
                     caption: qualityText
                 }, { quoted: incomingMessage });
 
@@ -185,9 +194,8 @@ cmd({
                     return;
                 }
 
-                // Size check (Convert to GB and check if > 2GB)
+                // Size check (2GB Limit)
                 const sizeLower = selectedPick.size.toLowerCase();
-                // Check if size includes 'gb', otherwise assume MB and divide by 1024
                 const sizeInGB = sizeLower.includes('gb') ? parseFloat(sizeLower) : parseFloat(sizeLower) / 1024;
                 
                 if (sizeInGB > 2) {
@@ -198,7 +206,6 @@ cmd({
                 }
 
                 // Prepare file details
-                // Clean the title to be a valid file name
                 const cleanFileName = film.title.replace(/[\\/:*?"<>|]/g, ''); 
                 const finalFileName = `🎥 ${cleanFileName}.mp4 - ${selectedPick.q} (KAVI ツ • )`;
 
