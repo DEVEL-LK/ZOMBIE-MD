@@ -8,7 +8,6 @@ const API_KEY = '25f974dba76310042bcd3c9488eec9093816ef32eb36d34c1b6b875ac921593
 const SEARCH_API = 'https://foreign-marna-sithaunarathnapromax-9a005c2e.koyeb.app/api/cinesubz/search';
 const MOVIE_DETAIL_API = 'https://foreign-marna-sithaunarathnapromax-9a005c2e.koyeb.app/api/cinesubz/movie-details';
 const TV_DETAIL_API = 'https://foreign-marna-sithaunarathnapromax-9a005c2e.koyeb.app/api/cinesubz/tvshow-details';
-const EPISODE_DETAIL_API = 'https://foreign-marna-sithaunarathnapromax-9a005c2e.koyeb.app/api/cinesubz/episode-details';
 const DOWNLOAD_API = 'https://foreign-marna-sithaunarathnapromax-9a005c2e.koyeb.app/api/cinesubz/downloadurl';
 
 const searchCache = new NodeCache({ stdTTL: 60, checkperiod: 120 });
@@ -32,19 +31,22 @@ cmd({
 
         if (!apiData) {
             const url = `${SEARCH_API}?apiKey=${API_KEY}&q=${encodeURIComponent(q)}`;
-            let retries = 3;
+            let retries = 5;
             while (retries--) {
                 try {
-                    apiData = (await axios.get(url, { timeout: 10000 })).data;
-                    if (!apiData?.status || !apiData?.data?.length) throw new Error('No results.');
+                    apiData = (await axios.get(url, { timeout: 30000 })).data;
+                    if (!apiData || !apiData.status || !apiData.data?.length) throw new Error('No results.');
                     searchCache.set(cacheKey, apiData);
                     break;
-                } catch {
-                    if (!retries) throw new Error('❌ Search failed.');
-                    await new Promise(r => setTimeout(r, 1000));
+                } catch (err) {
+                    if (!retries) throw new Error('❌ Search failed. Try again later.');
+                    await new Promise(r => setTimeout(r, 2000));
                 }
             }
         }
+
+        // Log API response for debugging
+        l('Search API response:', apiData);
 
         const results = apiData.data.map((item, i) => ({
             n: i + 1,
@@ -84,7 +86,7 @@ cmd({
                 let infoData;
 
                 try {
-                    infoData = (await axios.get(`${detailApi}?apiKey=${API_KEY}&url=${encodeURIComponent(film.link)}`, { timeout: 10000 })).data.data;
+                    infoData = (await axios.get(`${detailApi}?apiKey=${API_KEY}&url=${encodeURIComponent(film.link)}`, { timeout: 30000 })).data.data;
                 } catch { infoData = null; }
 
                 let thumb = film.image;
@@ -94,27 +96,27 @@ cmd({
                     await bot.sendMessage(from, { image: { url: thumb }, caption: infoText }, { quoted: msg });
                 }
 
+                // Download links
                 let dlData;
-                let retries = 3;
+                let retries = 5;
                 while (retries--) {
                     try {
-                        dlData = (await axios.get(`${DOWNLOAD_API}?apiKey=${API_KEY}&url=${encodeURIComponent(film.link)}`, { timeout: 10000 })).data;
-                        if (!dlData.status) throw new Error();
+                        dlData = (await axios.get(`${DOWNLOAD_API}?apiKey=${API_KEY}&url=${encodeURIComponent(film.link)}`, { timeout: 30000 })).data;
+                        if (!dlData.status || !dlData.data?.downloadLinks?.length) throw new Error('No download links found.');
                         break;
                     } catch {
                         if (!retries) {
-                            await bot.sendMessage(from, { text: '❌ Download data failed.' }, { quoted: msg });
+                            await bot.sendMessage(from, { text: '❌ Download data failed. Try again later.' }, { quoted: msg });
                             return;
                         }
-                        await new Promise(r => setTimeout(r, 1000));
+                        await new Promise(r => setTimeout(r, 2000));
                     }
                 }
 
-                let links = dlData.data.downloadLinks || [];
-                if (!links.length) return await bot.sendMessage(from, { text: '❌ No download links.' }, { quoted: msg });
-
+                const links = dlData.data.downloadLinks || [];
                 const picks = [];
                 const qMap = {};
+
                 links.forEach(l => {
                     const key = l.quality.toUpperCase().replace(/\s/g,'');
                     let priority = key.includes('1080')||key.includes('FHD')?3:key.includes('720')||key.includes('HD')?2:1;
