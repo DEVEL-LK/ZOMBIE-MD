@@ -4,7 +4,7 @@ const log = console.log;
 const config = require('../config');
 const { cmd } = require('../command');
 const axios = require('axios');
-const NodeCache = new (require('node-cache'))({ 'stdTTL': 60, 'checkperiod': 120 });
+const NodeCache = require('node-cache'); // NodeCache library එක import කිරීම
 
 // --- API Configuration ---
 const API_BASE = 'https://sadaslk-apis.vercel.app/api/v1/movie/sinhalasub/';
@@ -12,6 +12,8 @@ const API_KEY = 'c56182a993f60b4f49cf97ab09886d17';
 const SEARCH_API = `${API_BASE}search?apiKey=${API_KEY}&q=`; // Search API
 const DOWNLOAD_API = `${API_BASE}infodl?apiKey=${API_KEY}&q=`; // Movie/Info DL API
 
+// [FIXED] searchCache විචල්‍යය නිවැරදිව new keyword එක යොදා ආරම්භ කිරීම
+const searchCache = new NodeCache({ 'stdTTL': 60, 'checkperiod': 120 });
 const BRAND = '' + config.MOVIE_FOOTER;
 const downloadOptionsMap = new Map();
 
@@ -30,6 +32,7 @@ cmd({
     match,          
     { from, q: searchQuery } 
 ) => {
+    // 1. Check for search query
     if (!searchQuery) {
         await conn.sendMessage(from, {
             text: '*🎬 Movie / TV Series Search*\n\n' +
@@ -44,6 +47,7 @@ cmd({
         const cacheKey = 'film_' + searchQuery.toLowerCase().trim();
         let searchData = searchCache.get(cacheKey);
 
+        // 2. Search for the movie/series (or fetch from cache)
         if (!searchData) {
             const apiUrl = SEARCH_API + encodeURIComponent(searchQuery); 
             let retries = 3;
@@ -58,6 +62,7 @@ cmd({
                 }
             }
 
+            // Check for results (using the 'data' structure)
             if (!searchData || !searchData.data || searchData.data.length === 0) { 
                 throw new Error('No results found.');
             }
@@ -74,14 +79,15 @@ cmd({
         }
         
         // [--- STEP 2: FIELD MAPPING ---]
-        // title, imdb, year සඳහා නිවැරදි names ඔබ මෙහි යාවත්කාලීන කළ යුතුය.
+        // ඔබට N/A වෙනුවට සත්‍ය දත්ත පෙන්වීමට අවශ්‍ය නම්, 
+        // ඔබ console log එකේ දුටු නිවැරදි names මෙහි යාවත්කාලීන කළ යුතුය.
         const searchResults = searchData.data.map((item, index) => ({
             n: index + 1,
-            // (1) ඔබ log එකේ දුටු නිවැරදි නම මෙහි දමන්න.
+            // (1) title සඳහා නිවැරදි නම යොදන්න:
             title: item.m_name || item.movie_title || item.name || item.title || 'N/A', 
-            // (2) ඔබ log එකේ දුටු නිවැරදි නම මෙහි දමන්න.
+            // (2) imdb සඳහා නිවැරදි නම යොදන්න:
             imdb: item.m_rating || item.imdb_rating || item.rating || item.imdb || 'N/A',      
-            // (3) ඔබ log එකේ දුටු නිවැරදි නම මෙහි දමන්න.
+            // (3) year සඳහා නිවැරදි නම යොදන්න:
             year: item.m_year || item.release_year || item.year || item.date || 'N/A',       
             link: item.link || item.url, 
             image: item.image || item.thumbnail 
@@ -94,6 +100,7 @@ cmd({
         }
         responseText += '🔢 Select number 🪀';
 
+        // [--- Image Error Handling Block ---]
         let messageOptions = { caption: responseText };
         let searchMessage;
 
@@ -107,27 +114,141 @@ cmd({
             log('Image Send Error, sending as text', e);
             searchMessage = await conn.sendMessage(from, { text: responseText }, { quoted: message });
         }
+        // [----------------------------------]
 
         // 4. Set up listener for follow-up message (Movie Selection)
         const messageHandler = async ({ messages: newMessages }) => {
-            // ... (Message handling code is the same)
-            // ... (Skipping the rest of the function for brevity)
+            const incomingMessage = newMessages?.[0];
             
+            if (!incomingMessage?.message?.extendedTextMessage?.text) return;
+            
+            const messageText = incomingMessage.message.extendedTextMessage.text.trim();
+            const quotedMessageId = incomingMessage.message.extendedTextMessage.contextInfo?.stanzaId;
+
+            // Handle 'off' command
+            if (messageText.toLowerCase() === 'off') {
+                conn.ev.off('messages.upsert', messageHandler); 
+                downloadOptionsMap.clear(); 
+                await conn.sendMessage(from, { text: 'OK.' }, { quoted: incomingMessage });
+                return;
+            }
+
             // --- First follow-up: Movie Selection ---
             if (quotedMessageId === searchMessage.key.id) {
-                // ... (Validation code)
+                const selectedNumber = parseInt(messageText);
+
+                if (isNaN(selectedNumber)) {
+                    await conn.sendMessage(from, { text: '❌ Invalid number.' }, { quoted: incomingMessage });
+                    return;
+                }
                 
-                // Link validity check added before encode
+                const selectedFilm = searchResults.find(item => item.n === selectedNumber);
+
+                if (!selectedFilm) {
+                    await conn.sendMessage(from, { text: '❌ Invalid number.' }, { quoted: incomingMessage });
+                    return;
+                }
+
+                // Download API Call (Info/DL)
                 const targetLink = selectedFilm.link.startsWith('http') ? selectedFilm.link : selectedFilm.link || 'Error';
                 const downloadApiUrl = DOWNLOAD_API + encodeURIComponent(targetLink);
-                // ... (Download API call logic)
+                let downloadData, retries = 3;
 
-                // ... (Quality selection logic)
+                while (retries--) {
+                    try {
+                        downloadData = (await axios.get(downloadApiUrl, { 'timeout': 10000 })).data;
+                        if (!downloadData.status) throw new Error();
+                        break;
+                    } catch {
+                        if (!retries) {
+                            await conn.sendMessage(from, { text: '❌ Fetch failed.' }, { quoted: incomingMessage });
+                            return;
+                        }
+                        await new Promise(resolve => setTimeout(resolve, 1000));
+                    }
+                }
+
+                // Get download links from the new API structure
+                const downloadLinks = downloadData.data.download_links; 
+                const qualityPicks = [];
+                
+                // Find SD and HD options
+                const sdOption = downloadLinks.find(item => item.quality.includes('480p') && item.direct_download);
+                const hdOption = downloadLinks.find(item => item.quality.includes('1080p') && item.direct_download) ||
+                                 downloadLinks.find(item => item.quality.includes('720p') && item.direct_download);
+
+                if (sdOption) qualityPicks.push({ n: 1, q: 'SD', ...sdOption });
+                if (hdOption) qualityPicks.push({ n: 2, q: 'HD', ...hdOption });
+
+                if (!qualityPicks.length) {
+                    await conn.sendMessage(from, { text: '❌ No links.' }, { quoted: incomingMessage });
+                    return;
+                }
+
+                // Format the quality selection message
+                let qualityText = `*🎬 ${selectedFilm.title}*\n\n📥 Choose Quality:\n\n`;
+                for (const pick of qualityPicks) {
+                    qualityText += `${pick.n}. *${pick.q}* (${pick.quality}) (📊 Size: ${pick.size})\n`;
+                }
+                qualityText += '\n*~https://whatsapp.com/channel/0029Vb5xFPHGE56jTnm4ZD2k~*';
+
+                // Send quality selection message
+                const qualityMessage = await conn.sendMessage(from, {
+                    image: { url: downloadData.data.image || selectedFilm.image }, 
+                    caption: qualityText
+                }, { quoted: incomingMessage });
+
+                // Store options for the next step
+                downloadOptionsMap.set(qualityMessage.key.id, { film: selectedFilm, picks: qualityPicks });
+                return;
             }
-            // ... (Second follow-up: Quality Selection logic)
-            
+
+            // --- Second follow-up: Quality Selection ---
+            if (downloadOptionsMap.has(quotedMessageId)) {
+                const { film, picks: qualityPicks } = downloadOptionsMap.get(quotedMessageId);
+                const selectedPick = qualityPicks.find(item => item.n === parseInt(messageText));
+
+                if (!selectedPick) {
+                    await conn.sendMessage(from, { text: '❌ Wrong quality.' }, { quoted: incomingMessage });
+                    return;
+                }
+
+                // Size check (2GB Limit)
+                const sizeLower = selectedPick.size.toLowerCase();
+                const sizeInGB = sizeLower.includes('gb') ? parseFloat(sizeLower) : parseFloat(sizeLower) / 1024;
+                
+                if (sizeInGB > 2) {
+                    await conn.sendMessage(from, { 
+                        text: '⚠️ Too large. Direct link:\n' + selectedPick.direct_download 
+                    }, { quoted: incomingMessage });
+                    return;
+                }
+
+                // Prepare file details
+                const cleanFileName = film.title.replace(/[\\/:*?"<>|]/g, ''); 
+                const finalFileName = `🎥 ${cleanFileName}.mp4 - ${selectedPick.q} (KAVI ツ • )`;
+
+                try {
+                    // Send the document (video)
+                    await conn.sendMessage(from, {
+                        document: { url: selectedPick.direct_download },
+                        mimetype: 'video/mp4',
+                        fileName: finalFileName,
+                        caption: `*🎬 ${film.title}*\n\n📊 Size: ${selectedPick.size}\n\n${config.MOVIE_FOOTER}`
+                    }, { quoted: incomingMessage });
+                    
+                    // Add a success reaction
+                    await conn.sendMessage(from, { react: { text: '✅', key: incomingMessage.key } });
+
+                } catch (e) {
+                    // Fallback to direct link if sending the document fails
+                    await conn.sendMessage(from, {
+                        text: '❌ Failed. Direct link:\n' + selectedPick.direct_download
+                    }, { quoted: incomingMessage });
+                }
+            }
         };
-        
+
         // Attach the message handler to the 'messages.upsert' event
         conn.ev.on('messages.upsert', messageHandler);
 
