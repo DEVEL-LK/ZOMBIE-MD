@@ -1,7 +1,5 @@
 /*
- * NOTE: The original variable/function names are placeholders.
- * Actual names (like 'l' for console.log) are preserved where clear.
- * The string array lookup (_0x2ae8a6(xxx)) is replaced with the actual string.
+ * NOTE: Original variable/function names preserved
  */
 
 const l = console.log;
@@ -17,6 +15,15 @@ const TV_DL_API = 'https://sadaslk-apis.vercel.app/api/v1/movie/sinhalasub/tv/dl
 
 const searchCache = new NodeCache({ 'stdTTL': 60, 'checkperiod': 120 });
 const BRAND = config.MOVIE_FOOTER;
+
+// -------------------------
+// ✅ Pixeldrain direct download fix
+// -------------------------
+function fixPixelDrain(url) {
+    if (!url.includes("/u/")) return url; // Already direct or other host
+    const id = url.split("/u/")[1];
+    return `https://pixeldrain.com/api/file/${id}?download`;
+}
 
 cmd({
     'pattern': 'sinhalasub',
@@ -210,12 +217,14 @@ cmd({
                 const safeTitle = film.title.replace(/[\\/:*?"<>|]/g, '');
                 const fileName = `🎥 ${safeTitle}.${selectedQuality.quality || 'DL'}.mp4`;
 
-                // ----------------------------------------------------
-                // ✅ FIXED DOWNLOAD SECTION (4KB issue solved)
-                // ----------------------------------------------------
+                // -------------------------
+                // ✅ FIXED DOWNLOAD SECTION (Pixeldrain 2.9KB issue solved)
+                // -------------------------
                 try {
+                    // Fix Pixeldrain link
+                    const fixedUrl = fixPixelDrain(selectedQuality.direct_download);
 
-                    const fileBuffer = await axios.get(selectedQuality.direct_download, {
+                    const fileBuffer = await axios.get(fixedUrl, {
                         responseType: 'arraybuffer',
                         headers: {
                             "User-Agent": "Mozilla/5.0",
@@ -239,7 +248,7 @@ cmd({
                         text: "❌ Failed to send file.\n🌐 Direct link:\n" + selectedQuality.direct_download
                     }, { quoted: incomingMessage });
                 }
-                // ----------------------------------------------------
+                // -------------------------
             }
         };
 
