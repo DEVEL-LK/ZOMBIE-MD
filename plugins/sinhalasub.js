@@ -70,13 +70,13 @@ cmd({
         }
 
         // 3. Process and display results
-        // [--- FINAL NAME FIX: ප්‍රතිඵලවල field names නිවැරදිව ලබා ගැනීම ---]
+        // [--- FINAL NAME FIX 2: 'm_' prefixes සමඟින් නැවතත් උත්සාහ කිරීම ---]
         const searchResults = searchData.data.map((item, index) => ({
             n: index + 1,
-            // Title, IMDb, Year සඳහා පොදු නම් කීපයක් උත්සාහ කරන්න:
-            title: item.movie_title || item.name || item.title || 'N/A', 
-            imdb: item.imdb_rating || item.rating || item.imdb || 'N/A',      
-            year: item.release_year || item.year || item.date || 'N/A',       
+            // Title, IMDb, Year සඳහා සියලු පොදු නම් උත්සාහ කරන්න:
+            title: item.m_name || item.movie_title || item.name || item.title || 'N/A', 
+            imdb: item.m_rating || item.imdb_rating || item.rating || item.imdb || 'N/A',      
+            year: item.m_year || item.release_year || item.year || item.date || 'N/A',       
             link: item.link || item.url, 
             image: item.image || item.thumbnail 
         }));
@@ -138,7 +138,9 @@ cmd({
                 }
 
                 // Download API Call (Info/DL)
-                const downloadApiUrl = DOWNLOAD_API + encodeURIComponent(selectedFilm.link);
+                // (Link එක තවමත් 'link' හෝ 'url' යන නමකින් ලැබෙන බව උපකල්පනය කර ඇත)
+                const targetLink = selectedFilm.link.startsWith('http') ? selectedFilm.link : selectedFilm.link || 'Error';
+                const downloadApiUrl = DOWNLOAD_API + encodeURIComponent(targetLink);
                 let downloadData, retries = 3;
 
                 while (retries--) {
