@@ -47,107 +47,124 @@ cmd({
 
         l('Search API response:', apiData);
 
+        // Prepare search results
         const results = apiData.data.map((item, index) => ({
             n: index + 1,
             title: item.title,
             imdb: item.rating || 'N/A',
             year: item.year || 'N/A',
             link: item.link,
-            image: item.imageSrc
+            image: item.imageSrc,
+            type: item.type
         }));
 
+        // Send plain text search list for number reply
         let replyText = '*🎬 SEARCH RESULTS*\n\n';
-        results.forEach(item => replyText += `🎬 *${item.n}. ${item.title}*\n⭐ Rating: ${item.imdb}\n📅 Year: ${item.year}\n\n`);
-        replyText += '🔢 Select number 🪀';
+        results.forEach(item => replyText += `${item.n}. ${item.title} | ${item.year} | ${item.imdb}\n`);
+        replyText += '\n🔢 Reply with number to select the movie/TV show.\nType *off* to cancel.';
 
-        const sentMessage = await bot.sendMessage(from, { image: { url: results[0].image }, caption: replyText }, { quoted: message });
+        const sentMessage = await bot.sendMessage(from, { text: replyText }, { quoted: message });
         const stateMap = new Map();
+        stateMap.set(sentMessage.key.id, { results });
 
+        // Handle replies
         const handler = async ({ messages }) => {
             const msg = messages?.[0];
             if (!msg?.message?.extendedTextMessage) return;
             const text = msg.message.extendedTextMessage.text.trim();
             const quotedId = msg.message.extendedTextMessage.contextInfo?.stanzaId;
 
+            // Cancel command
             if (text.toLowerCase() === 'off') {
                 bot.ev.off('messages.upsert', handler);
                 stateMap.clear();
-                await bot.sendMessage(from, { text: 'OK.' }, { quoted: msg });
+                await bot.sendMessage(from, { text: '✅ Cancelled.' }, { quoted: msg });
                 return;
             }
 
-            if (quotedId === sentMessage.key.id) {
-                const film = results.find(f => f.n === parseInt(text));
-                if (!film) return bot.sendMessage(from, { text: '❌ Invalid number.' }, { quoted: msg });
+            if (!stateMap.has(quotedId)) return;
 
-                const isTv = film.type && film.type.toLowerCase().includes('tv');
-                const detailApi = isTv ? TV_DETAIL_API : MOVIE_DETAIL_API;
-                let infoData;
+            const { results } = stateMap.get(quotedId);
+            const film = results.find(r => r.n === parseInt(text));
+            if (!film) return await bot.sendMessage(from, { text: '❌ Invalid number.' }, { quoted: msg });
 
+            // Determine API for details
+            const isTv = film.type.toLowerCase().includes('tv');
+            const detailApi = isTv ? TV_DETAIL_API : MOVIE_DETAIL_API;
+
+            // Fetch movie/tv details
+            let infoData;
+            try {
+                infoData = (await axios.get(`${detailApi}?apiKey=${API_KEY}&url=${encodeURIComponent(film.link)}`, { timeout: 30000 })).data.data;
+            } catch { infoData = null; }
+
+            let thumb = film.image;
+            if (infoData) thumb = infoData.image || film.image;
+
+            let infoText = `*🎬 ${infoData?.title || film.title}*\n📝 Description: ${infoData?.description || 'N/A'}\n📅 Release: ${infoData?.releaseDate || 'N/A'}\n⭐ Rating: ${infoData?.ratingValue || film.imdb}\n🎭 Genres: ${(infoData?.genres||[]).join(', ') || 'N/A'}\n\n🔢 Reply with number to choose quality.`;
+
+            await bot.sendMessage(from, { image: { url: thumb }, caption: infoText }, { quoted: msg });
+
+            // Download links
+            let dlData;
+            let retries = 5;
+            while (retries--) {
                 try {
-                    infoData = (await axios.get(`${detailApi}?apiKey=${API_KEY}&url=${encodeURIComponent(film.link)}`, { timeout: 30000 })).data.data;
-                } catch { infoData = null; }
-
-                let thumb = film.image;
-                if (infoData) {
-                    thumb = infoData.image || film.image;
-                    let infoText = `*🎬 ${infoData.title || film.title}*\n📝 Description: ${infoData.description || 'N/A'}\n📅 Release: ${infoData.releaseDate || 'N/A'}\n⭐ Rating: ${infoData.ratingValue || film.imdb}\n🎭 Genres: ${(infoData.genres||[]).join(', ') || 'N/A'}\n\n🔢 Select quality`;
-                    await bot.sendMessage(from, { image: { url: thumb }, caption: infoText }, { quoted: msg });
-                }
-
-                // Download links
-                let dlData;
-                let retries = 5;
-                while (retries--) {
-                    try {
-                        dlData = (await axios.get(`${DOWNLOAD_API}?apiKey=${API_KEY}&url=${encodeURIComponent(film.link)}`, { timeout: 30000 })).data;
-                        if (!dlData.status || !dlData.data?.downloadLinks?.length) throw new Error('No download links found.');
-                        break;
-                    } catch {
-                        if (!retries) {
-                            await bot.sendMessage(from, { text: '❌ Download data failed. Try again later.' }, { quoted: msg });
-                            return;
-                        }
-                        await new Promise(r => setTimeout(r, 2000));
+                    dlData = (await axios.get(`${DOWNLOAD_API}?apiKey=${API_KEY}&url=${encodeURIComponent(film.link)}`, { timeout: 30000 })).data;
+                    if (!dlData.status || !dlData.data?.downloadLinks?.length) throw new Error('No download links.');
+                    break;
+                } catch {
+                    if (!retries) {
+                        await bot.sendMessage(from, { text: '❌ Download data failed. Try again later.' }, { quoted: msg });
+                        return;
                     }
+                    await new Promise(r => setTimeout(r, 2000));
                 }
-
-                const links = dlData.data.downloadLinks || [];
-                const picks = [];
-                const qMap = {};
-
-                links.forEach(l => {
-                    const key = l.quality.toUpperCase().replace(/\s/g,'');
-                    let priority = key.includes('1080')||key.includes('FHD')?3:key.includes('720')||key.includes('HD')?2:1;
-                    if (!qMap[key] || qMap[key].priority < priority) qMap[key] = { ...l, priority };
-                });
-
-                Object.values(qMap).sort((a,b)=>b.priority-a.priority).slice(0,5).forEach((l,i)=> picks.push({ n:i+1, ...l }));
-
-                let qualityText = `*🎬 ${film.title}*\n\n📥 Choose Quality:\n\n`;
-                picks.forEach(p => qualityText += `${p.n}. *${p.quality}* • ${p.size || 'N/A'})\n`);
-                const qMsg = await bot.sendMessage(from, { image: { url: thumb }, caption: qualityText }, { quoted: msg });
-                stateMap.set(qMsg.key.id, { film, picks });
             }
 
-            if (stateMap.has(quotedId)) {
-                const { film, picks } = stateMap.get(quotedId);
-                const sel = picks.find(p=>p.n===parseInt(text));
-                if (!sel) return bot.sendMessage(from, { text: '❌ Wrong quality.' }, { quoted: msg });
+            const links = dlData.data.downloadLinks || [];
+            const picks = [];
+            const qMap = {};
+
+            links.forEach(l => {
+                const key = l.quality.toUpperCase().replace(/\s/g,'');
+                let priority = key.includes('1080')||key.includes('FHD')?3:key.includes('720')||key.includes('HD')?2:1;
+                if (!qMap[key] || qMap[key].priority < priority) qMap[key] = { ...l, priority };
+            });
+
+            Object.values(qMap).sort((a,b)=>b.priority-b.priority).slice(0,5).forEach((l,i)=> picks.push({ n:i+1, ...l }));
+
+            // Send quality options
+            let qualityText = `*🎬 ${film.title}*\n\n📥 Choose Quality:\n\n`;
+            picks.forEach(p => qualityText += `${p.n}. *${p.quality}* • ${p.size || 'N/A'}\n`);
+            const qMsg = await bot.sendMessage(from, { image: { url: thumb }, caption: qualityText }, { quoted: msg });
+            stateMap.set(qMsg.key.id, { film, picks });
+
+            // Handle quality selection
+            bot.ev.on('messages.upsert', async ({ messages }) => {
+                const m = messages?.[0];
+                if (!m?.message?.extendedTextMessage) return;
+                const txt = m.message.extendedTextMessage.text.trim();
+                const qId = m.message.extendedTextMessage.contextInfo?.stanzaId;
+                if (!stateMap.has(qId)) return;
+
+                const { film, picks } = stateMap.get(qId);
+                const sel = picks.find(p=>p.n===parseInt(txt));
+                if (!sel) return await bot.sendMessage(from, { text: '❌ Wrong quality.' }, { quoted: m });
 
                 const sizeLower = sel.size?.toLowerCase()||'0mb';
                 let sizeGB = sizeLower.includes('gb')?parseFloat(sizeLower):sizeLower.includes('mb')?(parseFloat(sizeLower)/1024):3;
-                if (sizeGB>2) return bot.sendMessage(from, { text:`⚠️ Too large (${sel.size}). Direct link:\n${sel.link}` }, { quoted: msg });
+                if (sizeGB>2) return bot.sendMessage(from, { text:`⚠️ Too large (${sel.size}). Direct link:\n${sel.link}` }, { quoted: m });
 
                 const fileName = `🎥 ${film.title.replace(/[\\/:*?"<>|]/g,'')}.${sel.quality||'DL'}.mp4`;
                 try {
                     const buf = await axios.get(sel.link, { responseType:'arraybuffer', timeout:60000 }).then(r=>r.data);
-                    await bot.sendMessage(from, { document: buf, mimetype:'video/mp4', fileName, caption:`*🎬 ${film.title}*\n*📊 Quality: ${sel.quality} • Size: ${sel.size || 'N/A'}\n\n${BRAND}` }, { quoted: msg });
-                    await bot.sendMessage(from, { react:{ text:"✅", key: msg.key } });
+                    await bot.sendMessage(from, { document: buf, mimetype:'video/mp4', fileName, caption:`*🎬 ${film.title}*\n*📊 Quality: ${sel.quality} • Size: ${sel.size || 'N/A'}\n\n${BRAND}` }, { quoted: m });
+                    await bot.sendMessage(from, { react:{ text:"✅", key: m.key } });
                 } catch {
-                    await bot.sendMessage(from, { text: `❌ Failed. Direct link:\n${sel.link}` }, { quoted: msg });
+                    await bot.sendMessage(from, { text: `❌ Failed. Direct link:\n${sel.link}` }, { quoted: m });
                 }
-            }
+            });
         };
 
         bot.ev.on('messages.upsert', handler);
