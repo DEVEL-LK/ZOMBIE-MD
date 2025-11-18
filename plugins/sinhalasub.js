@@ -85,16 +85,23 @@ cmd({
         }
         responseText += '🔢 Select number 🪀';
 
-        // [--- නිවැරදි කරන ලද කොටස ---]
+        // [--- නිවැරදි කරන ලද කොටස: Invalid media type දෝෂය මඟ හැරීම ---]
         let messageOptions = { caption: responseText };
+        let searchMessage;
 
-        // 🖼️ Error එක මඟහැරීමට image URL එකක් ඇත්දැයි පරීක්ෂා කිරීම.
+        // 🖼️ Error එක මඟහැරීමට image URL එකක් ඇත්දැයි පරීක්ෂා කිරීම සහ try-catch යෙදීම.
         if (searchResults[0] && searchResults[0].image) {
             messageOptions.image = { url: searchResults[0].image };
         }
         
-        // Send the search results message (Line 90 පමණ)
-        const searchMessage = await conn.sendMessage(from, messageOptions, { quoted: message });
+        try {
+            // Send the search results message (Line 90 පමණ)
+            searchMessage = await conn.sendMessage(from, messageOptions, { quoted: message });
+        } catch (e) {
+            log('Image Send Error, sending as text', e);
+            // If media sending fails (Invalid media type), send the results as a plain text message instead.
+            searchMessage = await conn.sendMessage(from, { text: responseText }, { quoted: message });
+        }
         // [---------------------------]
 
         // 4. Set up listener for follow-up message (Movie Selection)
