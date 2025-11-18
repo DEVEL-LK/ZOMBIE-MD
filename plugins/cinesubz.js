@@ -16,12 +16,12 @@ const BRAND = config.MOVIE_FOOTER;
 cmd({
     pattern: 'cinesubz',
     react: '🎬',
-    desc: 'Search and download Movies/TV Series',
+    desc: 'Search and download Movies/TV Series from CineSubz',
     category: 'download',
     filename: __filename
 }, async (bot, message, context, { from, q }) => {
     if (!q) {
-        await bot.sendMessage(from, { text: '*💡 Usage: .sinhalasub <search term>*' }, { quoted: message });
+        await bot.sendMessage(from, { text: '*💡 Usage: .cinesubz <search term>*' }, { quoted: message });
         return;
     }
 
@@ -35,7 +35,7 @@ cmd({
             while (retries--) {
                 try {
                     apiData = (await axios.get(url, { timeout: 30000 })).data;
-                    if (!apiData || !apiData.status || !apiData.data?.length) throw new Error('No results.');
+                    if (!apiData || !apiData.data?.length) throw new Error('No results.');
                     searchCache.set(cacheKey, apiData);
                     break;
                 } catch (err) {
@@ -45,16 +45,15 @@ cmd({
             }
         }
 
-        // Log API response for debugging
         l('Search API response:', apiData);
 
-        const results = apiData.data.map((item, i) => ({
-            n: i + 1,
-            title: item.title || item.Title,
+        const results = apiData.data.map((item, index) => ({
+            n: index + 1,
+            title: item.title,
+            imdb: item.rating || 'N/A',
             year: item.year || 'N/A',
-            imdb: item.imdb || 'N/A',
-            link: item.url || item.Link,
-            image: item.image || item.Img
+            link: item.link,
+            image: item.imageSrc
         }));
 
         let replyText = '*🎬 SEARCH RESULTS*\n\n';
@@ -81,7 +80,7 @@ cmd({
                 const film = results.find(f => f.n === parseInt(text));
                 if (!film) return bot.sendMessage(from, { text: '❌ Invalid number.' }, { quoted: msg });
 
-                const isTv = film.link.includes('/tv/') || film.link.includes('/episodes/');
+                const isTv = film.type && film.type.toLowerCase().includes('tv');
                 const detailApi = isTv ? TV_DETAIL_API : MOVIE_DETAIL_API;
                 let infoData;
 
@@ -92,7 +91,7 @@ cmd({
                 let thumb = film.image;
                 if (infoData) {
                     thumb = infoData.image || film.image;
-                    let infoText = `*🎬 ${infoData.title || film.title}*\n📝 Tagline: ${infoData.tagline || 'N/A'}\n📅 Release: ${infoData.releaseDate || 'N/A'}\n⏱ Runtime: ${infoData.runtime || 'N/A'}\n⭐ Rating: ${infoData.ratingValue || 'N/A'}\n🎭 Genres: ${(infoData.genres||[]).join(', ') || 'N/A'}\n\n🔢 Select quality`;
+                    let infoText = `*🎬 ${infoData.title || film.title}*\n📝 Description: ${infoData.description || 'N/A'}\n📅 Release: ${infoData.releaseDate || 'N/A'}\n⭐ Rating: ${infoData.ratingValue || film.imdb}\n🎭 Genres: ${(infoData.genres||[]).join(', ') || 'N/A'}\n\n🔢 Select quality`;
                     await bot.sendMessage(from, { image: { url: thumb }, caption: infoText }, { quoted: msg });
                 }
 
