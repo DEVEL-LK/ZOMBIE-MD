@@ -1,5 +1,5 @@
 /*
- * Advanced SinhalaSub Bot Command
+ * Advanced SinhalaSub Bot Command – API Safe Version
  */
 const l = console.log;
 const config = require('../config'); 
@@ -44,22 +44,34 @@ cmd({
 
         if (!apiData) {
             const searchUrl = `${SEARCH_API}q=${encodeURIComponent(searchQuery)}&apiKey=${API_KEY}`;
-            const response = await axios.get(searchUrl, { timeout: 10000 });
-            apiData = response.data;
-            if (!apiData?.status || !apiData?.data?.length) throw new Error('No results found.');
+            let response;
+            try {
+                response = await axios.get(searchUrl, { timeout: 10000 });
+            } catch (err) {
+                throw new Error('❌ Failed to fetch search results.');
+            }
+
+            // ✅ Safe response check
+            if (!response?.data) throw new Error('❌ No results returned from API.');
+            
+            // API may return different structures
+            const dataList = response.data.data || response.data.results || [];
+            if (!dataList.length) throw new Error('❌ No results found.');
+
+            apiData = { status: true, data: dataList };
             searchCache.set(cacheKey, apiData);
         }
 
         // Map results with extra details if available
         const results = apiData.data.map((item, index) => ({
             n: index + 1,
-            title: item.Title,
-            imdb: item.Rating || 'N/A',
-            year: item.Year || 'N/A',
-            genre: item.Genre || 'N/A',
-            plot: item.Plot || 'N/A',
-            link: item.Link,
-            image: item.Img
+            title: item.Title || item.title || 'N/A',
+            imdb: item.Rating || item.imdb || 'N/A',
+            year: item.Year || item.year || 'N/A',
+            genre: item.Genre || item.genre || 'N/A',
+            plot: item.Plot || item.plot || 'N/A',
+            link: item.Link || item.link,
+            image: item.Img || item.image || 'https://i.imgur.com/SL4nVxv.png'
         }));
 
         let replyText = '*🎬 SEARCH RESULTS*\n\n';
@@ -106,8 +118,9 @@ cmd({
 
                 let downloadData;
                 try {
-                    downloadData = (await axios.get(downloadUrl, { timeout: 10000 })).data;
-                    if (!downloadData.status) throw new Error();
+                    const dlResp = await axios.get(downloadUrl, { timeout: 10000 });
+                    downloadData = dlResp?.data;
+                    if (!downloadData?.status) throw new Error();
                 } catch {
                     await bot.sendMessage(from, { text: '❌ Error: Failed to retrieve data' }, { quoted: incomingMessage });
                     return;
@@ -117,23 +130,21 @@ cmd({
                 let thumbnailUrl = selectedFilm.image;
 
                 if (isTvEpisode) {
-                    // Multi-episode support
-                    downloadLinks = downloadData.data.filter(l => l.finalDownloadUrl).map(ep => ({
+                    downloadLinks = downloadData.data?.filter(l => l.finalDownloadUrl).map(ep => ({
                         quality: ep.quality,
                         size: ep.size || 'N/A',
                         link: ep.finalDownloadUrl,
                         episode: ep.episode || 'Ep1'
-                    }));
+                    })) || [];
                 } else {
-                    downloadLinks = downloadData.data.downloadLinks;
-                    thumbnailUrl = downloadData.data.images?.[0] || selectedFilm.image;
+                    downloadLinks = downloadData.data?.downloadLinks || [];
+                    thumbnailUrl = downloadData.data?.images?.[0] || selectedFilm.image;
                 }
 
-                // Quality selection
                 const availableQualities = {};
                 for (let i = 0; i < downloadLinks.length; i++) {
                     const link = downloadLinks[i];
-                    const qKey = link.quality.toUpperCase().replace(/\s/g, '');
+                    const qKey = (link.quality || 'N/A').toUpperCase().replace(/\s/g, '');
                     let priority = 0;
                     if (qKey.includes('1080P') || qKey.includes('FHD')) priority = 3;
                     else if (qKey.includes('720P') || qKey.includes('HD')) priority = 2;
@@ -170,7 +181,6 @@ cmd({
                 return;
             }
 
-            // Quality selected
             if (stateMap.has(quotedId)) {
                 const { film, picks, isTvEpisode } = stateMap.get(quotedId);
                 const selectedQuality = picks.find(p => p.n === parseInt(text));
@@ -179,7 +189,6 @@ cmd({
                     return;
                 }
 
-                // Multi-episode download for TV shows
                 if (isTvEpisode) {
                     for (const ep of downloadLinks.filter(l => l.quality === selectedQuality.quality)) {
                         const fileBuffer = await axios.get(fixPixelDrain(ep.link), { responseType: 'arraybuffer', timeout: 60000 }).then(r => r.data);
@@ -194,7 +203,6 @@ cmd({
                     return;
                 }
 
-                // Single movie download
                 const fileBuffer = await axios.get(fixPixelDrain(selectedQuality.direct_download), { responseType: 'arraybuffer', timeout: 60000 }).then(r => r.data);
                 await bot.sendMessage(from, {
                     document: fileBuffer,
