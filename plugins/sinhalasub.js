@@ -1,267 +1,233 @@
-/*
- * NOTE: The original variable/function names are placeholders.
- * Actual names (like 'l' for console.log) are preserved where clear.
- * The string array lookup (_0x2ae8a6(xxx)) is replaced with the actual string.
- */
+// --- Imports and Initialization ---
 
-const l = console.log;
-const config = require('../config'); // Loads configuration
-const { cmd } = require('../command'); // Bot command framework
-const axios = require('axios'); // HTTP client for API calls
-const NodeCache = require('node-cache'); // Cache for search results
+const log = console.log;
+const config = require('../config');
+const { cmd } = require('../command');
+const axios = require('axios');
+const NodeCache = require('node-cache');
 
-// --- NEW API CONFIGURATION ---
-const API_KEY = 'c56182a993f60b4f49cf97ab09886d17'; // Your API Key
-const SEARCH_API = 'https://sadaslk-apis.vercel.app/api/v1/movie/sinhalasub/search?';
-const MOVIE_DL_API = 'https://sadaslk-apis.vercel.app/api/v1/movie/sinhalasub/infodl?';
-const TV_DL_API = 'https://sadaslk-apis.vercel.app/api/v1/movie/sinhalasub/tv/dl?'; // Used for TV Episode DL
-// -----------------------------
-
-// Cache search results for 60 seconds (stdTTL: 0x3c)
+// Cache for search results (TTL: 60 seconds)
 const searchCache = new NodeCache({ 'stdTTL': 60, 'checkperiod': 120 });
-const BRAND = config.MOVIE_FOOTER; // Likely a brand/footer string
+const BRAND = '' + config.MOVIE_FOOTER;
 
-// --- Main Command Definition ---
+// Map to temporarily store download options after a movie is selected
+// Key: Message ID of the quality selection message
+const downloadOptionsMap = new Map();
+
+// --- Command Definition ---
+
 cmd({
-    'pattern': 'sinhalasub',
-    'react': '🎬',
-    'desc': 'Search and download Movies/TV Series',
-    'category': 'download',
-    'filename': __filename
-}, async (bot, message, context, { from, q: searchQuery }) => {
-    // 1. Handle No Search Query
+    pattern: 'sinhalasub',
+    react: '🎬',
+    desc: 'Search and download Movies/TV Series',
+    category: 'download',
+    filename: __filename
+}, async (
+    conn,           // Connection object (WhatsApp client)
+    message,        // Message object from the user
+    match,          // Command argument match (not used directly here)
+    { from, q: searchQuery } // Destructured: 'from' (chat ID), 'q' (query string)
+) => {
+    // 1. Check for search query
     if (!searchQuery) {
-        await bot.sendMessage(from, {
-            'text': '*💡 Type Your Movie ㋡*\n\n📋 Usage: .sinhalasub <search term>\n📝 Example: .sinhalasub Breaking Bad\n\n' + '*🎬 Movie / TV Series Search*'
-        }, { 'quoted': message });
+        await conn.sendMessage(from, {
+            text: '*🎬 Movie / TV Series Search*\n\n' +
+                  '*💡 Type Your Movie ㋡*\n' +
+                  '📝 Example: .sinhalasub Breaking Bad\n\n' +
+                  '📋 Usage: .sinhalasub <search term>\n'
+        }, { quoted: message });
         return;
     }
 
     try {
         const cacheKey = 'film_' + searchQuery.toLowerCase().trim();
-        let apiData = searchCache.get(cacheKey);
+        let searchData = searchCache.get(cacheKey);
 
-        // 2. Search Logic (API Call & Caching)
-        if (!apiData) {
-            const searchUrl = `${SEARCH_API}q=${encodeURIComponent(searchQuery)}&apiKey=${API_KEY}`;
-            
+        // 2. Search for the movie/series (or fetch from cache)
+        if (!searchData) {
+            const apiUrl = 'https://apis.davidcyriltech.my.id/movies/search?query=' + encodeURIComponent(searchQuery);
             let retries = 3;
             while (retries--) {
                 try {
-                    const response = await axios.get(searchUrl, { 'timeout': 10000 }); // 10s timeout
-                    apiData = response.data;
+                    const response = await axios.get(apiUrl, { 'timeout': 10000 }); // 10s timeout
+                    searchData = response.data;
                     break;
                 } catch (error) {
-                    if (!retries) throw new Error('❌ Fetch failed.');
-                    await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second before retry
+                    if (!retries) throw new Error('Failed to retrieve data');
+                    await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second before retrying
                 }
             }
 
-            // FIX 1: Search API Response Check: Use 'data' instead of 'results'
-            if (!apiData?.status || !apiData?.data?.length) {
+            // Check if results are valid
+            if (!searchData?.status || !searchData.results?.length) {
                 throw new Error('No results found.');
             }
-            searchCache.set(cacheKey, apiData);
+
+            // Cache the successful results
+            searchCache.set(cacheKey, searchData);
         }
 
-        // 3. Format Search Results for Display
-        // FIX 2: Search API Data Mapping: Use 'apiData.data' and correct field names
-        const results = apiData.data.map((item, index) => ({
-            'n': index + 1, 
-            'title': item.Title, 
-            'imdb': item.Rating || 'N/A', 
-            'year': item.Year || 'N/A', 
-            'link': item.Link, 
-            'image': item.Img
+        // 3. Process and display results
+        const searchResults = searchData.results.map((item, index) => ({
+            n: index + 1,
+            title: item.title,
+            imdb: item.imdb,
+            year: item.year,
+            link: item.link,
+            image: item.thumbnail
         }));
 
-        let replyText = '*🎬 SEARCH RESULTS*\n\n';
-        for (const item of results) {
-            replyText += `🎬 *${item.n}. ${item.title}*\n  ⭐ Rating: ${item.imdb}\n  📅 Year: ${item.year}\n\n`;
+        let responseText = '*🎬 SEARCH RESULTS*\n\n';
+        for (const result of searchResults) {
+            responseText += `${result.n}. *${result.title}* • ⭐ IMDB: ${result.imdb} • 📅 Year: ${result.year}\n\n`;
         }
-        replyText += '🔢 Select number 🪀';
+        responseText += '🔢 Select number 🪀';
 
-        // 4. Send Results and Setup Interactive Listener
-        const sentMessage = await bot.sendMessage(from, {
-            'image': { 'url': results[0].image }, // Use first result's thumbnail
-            'caption': replyText
-        }, { 'quoted': message });
+        // Send the search results message (with the first result's thumbnail)
+        const searchMessage = await conn.sendMessage(from, {
+            image: { url: searchResults[0].image },
+            caption: responseText
+        }, { quoted: message });
 
-        const stateMap = new Map();
-
-        // Listener for user's selection (reply to the message)
-        const selectionHandler = async ({ messages }) => {
-            const incomingMessage = messages?.[0];
-            if (!incomingMessage?.message?.extendedTextMessage) return;
-
-            const text = incomingMessage.message.extendedTextMessage.text.trim();
-            const quotedId = incomingMessage.message.extendedTextMessage.contextInfo?.stanzaId;
+        // 4. Set up listener for follow-up message (Movie Selection)
+        const messageHandler = async ({ messages: newMessages }) => {
+            const incomingMessage = newMessages?.[0];
             
-            if (text.toLowerCase() === 'off') {
-                bot.ev.off('messages.upsert', selectionHandler);
-                stateMap.clear();
-                await bot.sendMessage(from, { 'text': 'OK.' }, { 'quoted': incomingMessage });
+            // Check if it's a valid text message
+            if (!incomingMessage?.message?.extendedTextMessage?.text) return;
+            
+            const messageText = incomingMessage.message.extendedTextMessage.text.trim();
+            const quotedMessageId = incomingMessage.message.extendedTextMessage.contextInfo?.stanzaId;
+
+            // Handle 'off' command to stop listening (optional feature)
+            if (messageText.toLowerCase() === 'off') {
+                conn.ev.off('messages.upsert', messageHandler); // Turn off the listener
+                downloadOptionsMap.clear(); // Clear any pending download options
+                await conn.sendMessage(from, { text: 'OK.' }, { quoted: incomingMessage });
                 return;
             }
 
-            if (quotedId === sentMessage.key.id) {
-                // --- Movie Selection (First Stage) ---
-                const selectedFilm = results.find(item => item.n === parseInt(text));
+            // --- First follow-up: Movie Selection ---
+            if (quotedMessageId === searchMessage.key.id) {
+                const selectedNumber = parseInt(messageText);
 
-                if (!selectedFilm) {
-                    await bot.sendMessage(from, { 'text': '❌ Invalid number.' }, { 'quoted': incomingMessage });
+                if (isNaN(selectedNumber)) {
+                    await conn.sendMessage(from, { text: '❌ Invalid number.' }, { quoted: incomingMessage });
                     return;
                 }
                 
-                // Determine if it's a Movie or TV episode
-                const isTvEpisode = selectedFilm.link.includes('/episodes/');
+                const selectedFilm = searchResults.find(item => item.n === selectedNumber);
 
-                // 5. Fetch Download Links
-                const dlBaseUrl = isTvEpisode ? TV_DL_API : MOVIE_DL_API;
-                const downloadUrl = `${dlBaseUrl}q=${encodeURIComponent(selectedFilm.link)}&apiKey=${API_KEY}`;
+                if (!selectedFilm) {
+                    await conn.sendMessage(from, { text: '❌ Invalid number.' }, { quoted: incomingMessage });
+                    return;
+                }
 
-                let downloadData;
-                let retries = 3;
+                // Call the download link API
+                const downloadApiUrl = 'https://apis.davidcyriltech.my.id/movies/download?url=' + encodeURIComponent(selectedFilm.link);
+                let downloadData, retries = 3;
+
                 while (retries--) {
                     try {
-                        downloadData = (await axios.get(downloadUrl, { 'timeout': 10000 })).data;
+                        downloadData = (await axios.get(downloadApiUrl, { 'timeout': 10000 })).data;
                         if (!downloadData.status) throw new Error();
                         break;
                     } catch {
                         if (!retries) {
-                            await bot.sendMessage(from, { 'text': '❌ Error: Failed to retrieve data' }, { 'quoted': incomingMessage });
+                            await conn.sendMessage(from, { text: '❌ Fetch failed.' }, { quoted: incomingMessage });
                             return;
                         }
                         await new Promise(resolve => setTimeout(resolve, 1000));
                     }
                 }
 
-                let downloadLinks = [];
-                let thumbnailUrl = selectedFilm.image;
-                
-                if (isTvEpisode) {
-                    // FIX 3a: TV DL Response. Filter for usable hosts and map finalDownloadUrl to 'link'
-                    downloadLinks = downloadData.data.filter(link => 
-                        link.finalDownloadUrl && (link.host === 'DLServer-01' || link.host === 'DLServer-02' || link.host === 'Usersdrive')
-                    ).map(link => ({
-                        'quality': link.quality,
-                        'size': 'N/A', 
-                        'link': link.finalDownloadUrl
-                    }));
-                } else {
-                    // FIX 3b: Movie DL Response uses 'downloadLinks' array
-                    downloadLinks = downloadData.data.downloadLinks;
-                    thumbnailUrl = downloadData.data.images?.[0] || selectedFilm.image; 
-                }
+                const downloadLinks = downloadData.download_links.download_links;
+                const qualityPicks = [];
 
-                // 6. Filter & Format Available Quality Options
-                const picks = [];
-                const availableQualities = {};
-                
-                // *** FIX 6: Remove the strict direct link filter to allow all links (including Pixeldrain) ***
-                for (let i = 0; i < downloadLinks.length; i++) {
-                    const link = downloadLinks[i];
-                    
-                    const quality = link.quality;
-                    const size = link.size || 'N/A';
-                    const directLink = link.link; 
-                    
-                    // --- Filter Removed: All links are allowed if directLink exists ---
-                    const isDirectDownload = directLink && true; 
-                    
-                    if (isDirectDownload) {
-                        const qKey = quality.toUpperCase().replace(/\s/g, ''); 
-                        let priority = 0;
-                        if (qKey.includes('1080P') || qKey.includes('FHD')) priority = 3;
-                        else if (qKey.includes('720P') || qKey.includes('HD')) priority = 2;
-                        else if (qKey.includes('480P') || qKey.includes('SD')) priority = 1;
+                // Find best SD and HD options (prioritizing 1080p, then 720p)
+                const sdOption = downloadLinks.find(item => item.quality === 'SD 480p' && item.direct_download);
+                const hdOption = downloadLinks.find(item => item.quality === 'FHD 1080p' && item.direct_download) ||
+                                 downloadLinks.find(item => item.quality === 'HD 720p' && item.direct_download);
 
-                        if (!availableQualities[qKey] || availableQualities[qKey].priority < priority) {
-                            availableQualities[qKey] = { quality, size, direct_download: directLink, priority };
-                        }
-                    }
-                }
-                
-                const sortedPicks = Object.values(availableQualities)
-                    .sort((a, b) => b.priority - a.priority) 
-                    .slice(0, 5); 
+                if (sdOption) qualityPicks.push({ n: 1, q: 'SD', ...sdOption });
+                if (hdOption) qualityPicks.push({ n: 2, q: 'HD', ...hdOption });
 
-                for (let i = 0; i < sortedPicks.length; i++) {
-                    picks.push({ 'n': i + 1, ...sortedPicks[i] });
-                }
-
-                // Check if any links were successfully parsed
-                if (!picks.length) {
-                    await bot.sendMessage(from, { 'text': '❌ No usable download links found in the API response data.' }, { 'quoted': incomingMessage });
+                if (!qualityPicks.length) {
+                    await conn.sendMessage(from, { text: '❌ No links.' }, { quoted: incomingMessage });
                     return;
                 }
 
-                let qualityReply = `*🎬 ${selectedFilm.title}*\n\n📥 Choose Quality:\n\n`;
-                for (const pick of picks) {
-                    qualityReply += `${pick.n}. *${pick.quality}* • ${pick.size})\n`;
+                // Format the quality selection message
+                let qualityText = `*🎬 ${selectedFilm.title}*\n\n📥 Choose Quality:\n\n`;
+                for (const pick of qualityPicks) {
+                    qualityText += `${pick.n}. *${pick.q}* (📊 Size: ${pick.size})\n`;
                 }
-                qualityReply += '\n*~https://whatsapp.com/channel/0029Vb5xFPHGE56jTnm4ZD2k~*';
+                qualityText += '\n*~https://whatsapp.com/channel/0029Vb5xFPHGE56jTnm4ZD2k~*'; // Original Footer Link
 
-                // 7. Send Quality Selection Message
-                const qualityMessage = await bot.sendMessage(from, {
-                    'image': { 'url': thumbnailUrl },
-                    'caption': qualityReply
-                }, { 'quoted': incomingMessage });
+                // Send quality selection message
+                const qualityMessage = await conn.sendMessage(from, {
+                    image: { url: downloadData.download_links.image || selectedFilm.image },
+                    caption: qualityText
+                }, { quoted: incomingMessage });
 
-                // Store film and quality options for the next step
-                stateMap.set(qualityMessage.key.id, { 'film': selectedFilm, 'picks': picks });
+                // Store options for the next step
+                downloadOptionsMap.set(qualityMessage.key.id, { film: selectedFilm, picks: qualityPicks });
                 return;
             }
 
-            // --- Quality Selection (Second Stage) ---
-            if (stateMap.has(quotedId)) {
-                const { film, picks } = stateMap.get(quotedId);
-                const selectedQuality = picks.find(item => item.n === parseInt(text));
+            // --- Second follow-up: Quality Selection ---
+            if (downloadOptionsMap.has(quotedMessageId)) {
+                const { film, picks: qualityPicks } = downloadOptionsMap.get(quotedMessageId);
+                const selectedPick = qualityPicks.find(item => item.n === parseInt(messageText));
 
-                if (!selectedQuality) {
-                    await bot.sendMessage(from, { 'text': '❌ Wrong quality.' }, { 'quoted': incomingMessage });
+                if (!selectedPick) {
+                    await conn.sendMessage(from, { text: '❌ Wrong quality.' }, { quoted: incomingMessage });
                     return;
                 }
 
-                // 8. Size Check (Limit downloads to 2GB or less)
-                const sizeLower = selectedQuality.size ? selectedQuality.size.toLowerCase() : '0mb';
+                // Size check (Convert to GB and check if > 2GB)
+                const sizeLower = selectedPick.size.toLowerCase();
+                // Check if size includes 'gb', otherwise assume MB and divide by 1024
+                const sizeInGB = sizeLower.includes('gb') ? parseFloat(sizeLower) : parseFloat(sizeLower) / 1024;
                 
-                let sizeInGB = 3; 
-                if (sizeLower.includes('gb')) {
-                    sizeInGB = parseFloat(sizeLower) || 3;
-                } else if (sizeLower.includes('mb')) {
-                    sizeInGB = (parseFloat(sizeLower) || 0) / 1024;
-                }
-                
-                if (sizeInGB > 2) { 
-                    await bot.sendMessage(from, { 'text': `⚠️ Too large (${selectedQuality.size}). Direct link:\n` + selectedQuality.direct_download }, { 'quoted': incomingMessage });
+                if (sizeInGB > 2) {
+                    await conn.sendMessage(from, { 
+                        text: '⚠️ Too large. Direct link:\n' + selectedPick.direct_download 
+                    }, { quoted: incomingMessage });
                     return;
                 }
 
-                // 9. Prepare and Send File
-                const safeTitle = film.title.replace(/[\\/:*?"<>|]/g, '');
-                const fileName = `🎥 ${safeTitle}.${selectedQuality.quality || 'DL'}.mp4`;
+                // Prepare file details
+                // Clean the title to be a valid file name
+                const cleanFileName = film.title.replace(/[\\/:*?"<>|]/g, ''); 
+                const finalFileName = `🎥 ${cleanFileName}.mp4 - ${selectedPick.q} (KAVI ツ • )`;
 
                 try {
-                    await bot.sendMessage(from, {
-                        'document': { 'url': selectedQuality.direct_download },
-                        'mimetype': 'video/mp4',
-                        'fileName': fileName,
-                        'caption': `*🎬 ${film.title}*\n*📊 Quality: ${selectedQuality.quality} • Size: ${selectedQuality.size || 'N/A'}\n\n${config.MOVIE_FOOTER}`
-                    }, { 'quoted': incomingMessage });
-                    await bot.sendMessage(from, { 'react': { 'text': '✅', 'key': incomingMessage.key } });
-                } catch {
-                    // If download fails, send the direct URL to the user
-                    await bot.sendMessage(from, { 'text': '❌ Failed to send file. Direct link:\n' + selectedQuality.direct_download }, { 'quoted': incomingMessage });
+                    // Send the document (video)
+                    await conn.sendMessage(from, {
+                        document: { url: selectedPick.direct_download },
+                        mimetype: 'video/mp4',
+                        fileName: finalFileName,
+                        caption: `*🎬 ${film.title}*\n\n📊 Size: ${selectedPick.size}\n\n${config.MOVIE_FOOTER}`
+                    }, { quoted: incomingMessage });
+                    
+                    // Add a success reaction
+                    await conn.sendMessage(from, { react: { text: '✅', key: incomingMessage.key } });
+
+                } catch (e) {
+                    // Fallback to direct link if sending the document fails
+                    await conn.sendMessage(from, {
+                        text: '❌ Failed. Direct link:\n' + selectedPick.direct_download
+                    }, { quoted: incomingMessage });
                 }
             }
         };
-        
-        // Start listening for the user's reply
-        bot.ev.on('messages.upsert', selectionHandler);
+
+        // Attach the message handler to the 'messages.upsert' event
+        conn.ev.on('messages.upsert', messageHandler);
 
     } catch (error) {
-        l(error);
-        await bot.sendMessage(from, { 'text': '❌ Error: ' + error.message }, { 'quoted': message });
+        log('error', error);
+        await conn.sendMessage(from, { text: '❌ Error: ' + error.message }, { quoted: message });
     }
 });
