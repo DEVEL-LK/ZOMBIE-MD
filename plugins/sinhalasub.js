@@ -100,7 +100,6 @@ cmd({
             }
 
             if (quotedId === sentMessage.key.id) {
-
                 const selectedFilm = results.find(item => item.n === parseInt(text));
                 if (!selectedFilm) {
                     await bot.sendMessage(from, { 'text': '❌ Invalid number.' }, { 'quoted': incomingMessage });
@@ -108,6 +107,35 @@ cmd({
                 }
 
                 const isTvEpisode = selectedFilm.link.includes('/episodes/');
+
+                // -------------------------
+                // ✅ Fetch Movie Info before quality select
+                // -------------------------
+                let movieInfo;
+                try {
+                    const infoUrl = `${MOVIE_DL_API}q=${encodeURIComponent(selectedFilm.link)}&apiKey=${API_KEY}`;
+                    const response = await axios.get(infoUrl, { timeout: 10000 });
+                    movieInfo = response.data.data; // title, imageUrl, runtime, ratingValue, genres, tagline, pixeldrainDownloads
+                } catch (err) {
+                    movieInfo = null;
+                }
+
+                if (movieInfo) {
+                    let infoText = `*🎬 ${movieInfo.title}*\n`;
+                    infoText += `📝 Tagline: ${movieInfo.tagline || 'N/A'}\n`;
+                    infoText += `📅 Release Date: ${movieInfo.releaseDate || 'N/A'}\n`;
+                    infoText += `⏱ Runtime: ${movieInfo.runtime || 'N/A'}\n`;
+                    infoText += `⭐ Rating: ${movieInfo.ratingValue || 'N/A'}\n`;
+                    infoText += `🌍 Country: ${movieInfo.country || 'N/A'}\n`;
+                    infoText += `🎭 Genres: ${(movieInfo.genres || []).join(', ') || 'N/A'}\n\n`;
+                    infoText += `🔢 Now select quality for download`;
+
+                    await bot.sendMessage(from, {
+                        image: { url: movieInfo.imageUrl || selectedFilm.image },
+                        caption: infoText
+                    }, { quoted: incomingMessage });
+                }
+
                 const dlBaseUrl = isTvEpisode ? TV_DL_API : MOVIE_DL_API;
                 const downloadUrl = `${dlBaseUrl}q=${encodeURIComponent(selectedFilm.link)}&apiKey=${API_KEY}`;
 
@@ -184,7 +212,7 @@ cmd({
                 for (const pick of picks) {
                     qualityReply += `${pick.n}. *${pick.quality}* • ${pick.size})\n`;
                 }
-                qualityReply += '\n*~https://whatsapp.com/channel/0029Vb5xFPHGE56jTnm4ZD2k~*';
+                qualityReply += '\n*M O V I E*';
 
                 const qualityMessage = await bot.sendMessage(from, {
                     'image': { 'url': thumbnailUrl },
@@ -195,6 +223,9 @@ cmd({
                 return;
             }
 
+            // -------------------------
+            // ✅ Download Section (Pixeldrain fix included)
+            // -------------------------
             if (stateMap.has(quotedId)) {
                 const { film, picks } = stateMap.get(quotedId);
                 const selectedQuality = picks.find(item => item.n === parseInt(text));
@@ -217,11 +248,7 @@ cmd({
                 const safeTitle = film.title.replace(/[\\/:*?"<>|]/g, '');
                 const fileName = `🎥 ${safeTitle}.${selectedQuality.quality || 'DL'}.mp4`;
 
-                // -------------------------
-                // ✅ FIXED DOWNLOAD SECTION (Pixeldrain 2.9KB issue solved)
-                // -------------------------
                 try {
-                    // Fix Pixeldrain link
                     const fixedUrl = fixPixelDrain(selectedQuality.direct_download);
 
                     const fileBuffer = await axios.get(fixedUrl, {
@@ -248,7 +275,6 @@ cmd({
                         text: "❌ Failed to send file.\n🌐 Direct link:\n" + selectedQuality.direct_download
                     }, { quoted: incomingMessage });
                 }
-                // -------------------------
             }
         };
 
