@@ -70,15 +70,15 @@ cmd({
         }
 
         // 3. Process and display results
-        // [--- නිවැරදි කිරීම: ප්‍රතිඵලවල field names නිවැරදිව ලබා ගැනීම ---]
+        // [--- FINAL NAME FIX: ප්‍රතිඵලවල field names නිවැරදිව ලබා ගැනීම ---]
         const searchResults = searchData.data.map((item, index) => ({
             n: index + 1,
-            // Most likely field names for the new API:
-            title: item.name || item.title,      // Title property
-            imdb: item.rating || item.imdb,      // Rating property
-            year: item.release_year || item.year, // Year property
-            link: item.link, 
-            image: item.image 
+            // Title, IMDb, Year සඳහා පොදු නම් කීපයක් උත්සාහ කරන්න:
+            title: item.movie_title || item.name || item.title || 'N/A', 
+            imdb: item.imdb_rating || item.rating || item.imdb || 'N/A',      
+            year: item.release_year || item.year || item.date || 'N/A',       
+            link: item.link || item.url, 
+            image: item.image || item.thumbnail 
         }));
         // [--------------------------------------------------------]
 
