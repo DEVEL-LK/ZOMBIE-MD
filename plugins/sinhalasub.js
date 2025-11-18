@@ -1,7 +1,6 @@
 /*
- * NOTE: Original variable/function names preserved
+ * Advanced SinhalaSub Bot Command
  */
-
 const l = console.log;
 const config = require('../config'); 
 const { cmd } = require('../command');
@@ -13,30 +12,29 @@ const SEARCH_API = 'https://sadaslk-apis.vercel.app/api/v1/movie/sinhalasub/sear
 const MOVIE_DL_API = 'https://sadaslk-apis.vercel.app/api/v1/movie/sinhalasub/infodl?';
 const TV_DL_API = 'https://sadaslk-apis.vercel.app/api/v1/movie/sinhalasub/tv/dl?';
 
-const searchCache = new NodeCache({ 'stdTTL': 60, 'checkperiod': 120 });
-const BRAND = config.MOVIE_FOOTER;
+const searchCache = new NodeCache({ stdTTL: 60, checkperiod: 120 });
 
 // -------------------------
-// ✅ Pixeldrain direct download fix
+// Pixeldrain direct download fix
 // -------------------------
 function fixPixelDrain(url) {
-    if (!url.includes("/u/")) return url; // Already direct or other host
+    if (!url.includes("/u/")) return url;
     const id = url.split("/u/")[1];
     return `https://pixeldrain.com/api/file/${id}?download`;
 }
 
 cmd({
-    'pattern': 'sinhalasub',
-    'react': '🎬',
-    'desc': 'Search and download Movies/TV Series',
-    'category': 'download',
-    'filename': __filename
+    pattern: 'sinhalasub',
+    react: '🎬',
+    desc: 'Search and download Movies/TV Series with advanced features',
+    category: 'download',
+    filename: __filename
 }, async (bot, message, context, { from, q: searchQuery }) => {
 
     if (!searchQuery) {
         await bot.sendMessage(from, {
-            'text': '*💡 Type Your Movie ㋡*\n\n📋 Usage: .sinhalasub <search term>\n📝 Example: .sinhalasub Breaking Bad\n\n' + '*🎬 Movie / TV Series Search*'
-        }, { 'quoted': message });
+            text: '*💡 Type Your Movie ㋡*\n\n📋 Usage: .sinhalasub <search term>\n📝 Example: .sinhalasub Breaking Bad\n\n🎬 Movie / TV Series Search'
+        }, { quoted: message });
         return;
     }
 
@@ -46,42 +44,38 @@ cmd({
 
         if (!apiData) {
             const searchUrl = `${SEARCH_API}q=${encodeURIComponent(searchQuery)}&apiKey=${API_KEY}`;
-            
-            let retries = 3;
-            while (retries--) {
-                try {
-                    const response = await axios.get(searchUrl, { 'timeout': 10000 });
-                    apiData = response.data;
-                    break;
-                } catch (error) {
-                    if (!retries) throw new Error('❌ Fetch failed.');
-                    await new Promise(resolve => setTimeout(resolve, 1000));
-                }
-            }
-
+            const response = await axios.get(searchUrl, { timeout: 10000 });
+            apiData = response.data;
             if (!apiData?.status || !apiData?.data?.length) throw new Error('No results found.');
             searchCache.set(cacheKey, apiData);
         }
 
+        // Map results with extra details if available
         const results = apiData.data.map((item, index) => ({
-            'n': index + 1,
-            'title': item.Title,
-            'imdb': item.Rating || 'N/A',
-            'year': item.Year || 'N/A',
-            'link': item.Link,
-            'image': item.Img
+            n: index + 1,
+            title: item.Title,
+            imdb: item.Rating || 'N/A',
+            year: item.Year || 'N/A',
+            genre: item.Genre || 'N/A',
+            plot: item.Plot || 'N/A',
+            link: item.Link,
+            image: item.Img
         }));
 
         let replyText = '*🎬 SEARCH RESULTS*\n\n';
         for (const item of results) {
-            replyText += `🎬 *${item.n}. ${item.title}*\n  ⭐ Rating: ${item.imdb}\n  📅 Year: ${item.year}\n\n`;
+            replyText += `🎬 *${item.n}. ${item.title}*\n`;
+            replyText += `📅 Year: ${item.year}\n`;
+            replyText += `⭐ IMDb: ${item.imdb}\n`;
+            replyText += `🎭 Genre: ${item.genre}\n`;
+            replyText += `📝 Plot: ${item.plot.substring(0, 150)}...\n\n`;
         }
         replyText += '🔢 Select number 🪀';
 
         const sentMessage = await bot.sendMessage(from, {
-            'image': { 'url': results[0].image },
-            'caption': replyText
-        }, { 'quoted': message });
+            image: { url: results[0].image },
+            caption: replyText
+        }, { quoted: message });
 
         const stateMap = new Map();
 
@@ -91,197 +85,132 @@ cmd({
 
             const text = incomingMessage.message.extendedTextMessage.text.trim();
             const quotedId = incomingMessage.message.extendedTextMessage.contextInfo?.stanzaId;
-            
+
             if (text.toLowerCase() === 'off') {
                 bot.ev.off('messages.upsert', selectionHandler);
                 stateMap.clear();
-                await bot.sendMessage(from, { 'text': 'OK.' }, { 'quoted': incomingMessage });
+                await bot.sendMessage(from, { text: 'OK.' }, { quoted: incomingMessage });
                 return;
             }
 
             if (quotedId === sentMessage.key.id) {
                 const selectedFilm = results.find(item => item.n === parseInt(text));
                 if (!selectedFilm) {
-                    await bot.sendMessage(from, { 'text': '❌ Invalid number.' }, { 'quoted': incomingMessage });
+                    await bot.sendMessage(from, { text: '❌ Invalid number.' }, { quoted: incomingMessage });
                     return;
                 }
 
                 const isTvEpisode = selectedFilm.link.includes('/episodes/');
-
-                // -------------------------
-                // ✅ Fetch Movie Info before quality select
-                // -------------------------
-                let movieInfo;
-                try {
-                    const infoUrl = `${MOVIE_DL_API}q=${encodeURIComponent(selectedFilm.link)}&apiKey=${API_KEY}`;
-                    const response = await axios.get(infoUrl, { timeout: 10000 });
-                    movieInfo = response.data.data; // title, imageUrl, runtime, ratingValue, genres, tagline, pixeldrainDownloads
-                } catch (err) {
-                    movieInfo = null;
-                }
-
-                if (movieInfo) {
-                    let infoText = `*🎬 ${movieInfo.title}*\n`;
-                    infoText += `📝 Tagline: ${movieInfo.tagline || 'N/A'}\n`;
-                    infoText += `📅 Release Date: ${movieInfo.releaseDate || 'N/A'}\n`;
-                    infoText += `⏱ Runtime: ${movieInfo.runtime || 'N/A'}\n`;
-                    infoText += `⭐ Rating: ${movieInfo.ratingValue || 'N/A'}\n`;
-                    infoText += `🌍 Country: ${movieInfo.country || 'N/A'}\n`;
-                    infoText += `🎭 Genres: ${(movieInfo.genres || []).join(', ') || 'N/A'}\n\n`;
-                    infoText += `🔢 Now select quality for download`;
-
-                    await bot.sendMessage(from, {
-                        image: { url: movieInfo.imageUrl || selectedFilm.image },
-                        caption: infoText
-                    }, { quoted: incomingMessage });
-                }
-
                 const dlBaseUrl = isTvEpisode ? TV_DL_API : MOVIE_DL_API;
                 const downloadUrl = `${dlBaseUrl}q=${encodeURIComponent(selectedFilm.link)}&apiKey=${API_KEY}`;
 
                 let downloadData;
-                let retries = 3;
-                while (retries--) {
-                    try {
-                        downloadData = (await axios.get(downloadUrl, { 'timeout': 10000 })).data;
-                        if (!downloadData.status) throw new Error();
-                        break;
-                    } catch {
-                        if (!retries) {
-                            await bot.sendMessage(from, { 'text': '❌ Error: Failed to retrieve data' }, { 'quoted': incomingMessage });
-                            return;
-                        }
-                        await new Promise(resolve => setTimeout(resolve, 1000));
-                    }
+                try {
+                    downloadData = (await axios.get(downloadUrl, { timeout: 10000 })).data;
+                    if (!downloadData.status) throw new Error();
+                } catch {
+                    await bot.sendMessage(from, { text: '❌ Error: Failed to retrieve data' }, { quoted: incomingMessage });
+                    return;
                 }
 
                 let downloadLinks = [];
                 let thumbnailUrl = selectedFilm.image;
-                
+
                 if (isTvEpisode) {
-                    downloadLinks = downloadData.data.filter(link => 
-                        link.finalDownloadUrl && 
-                        (link.host === 'DLServer-01' || link.host === 'DLServer-02' || link.host === 'Usersdrive')
-                    ).map(link => ({
-                        'quality': link.quality,
-                        'size': 'N/A',
-                        'link': link.finalDownloadUrl
+                    // Multi-episode support
+                    downloadLinks = downloadData.data.filter(l => l.finalDownloadUrl).map(ep => ({
+                        quality: ep.quality,
+                        size: ep.size || 'N/A',
+                        link: ep.finalDownloadUrl,
+                        episode: ep.episode || 'Ep1'
                     }));
                 } else {
                     downloadLinks = downloadData.data.downloadLinks;
-                    thumbnailUrl = downloadData.data.images?.[0] || selectedFilm.image; 
+                    thumbnailUrl = downloadData.data.images?.[0] || selectedFilm.image;
                 }
 
-                const picks = [];
+                // Quality selection
                 const availableQualities = {};
-
                 for (let i = 0; i < downloadLinks.length; i++) {
                     const link = downloadLinks[i];
-                    const quality = link.quality;
-                    const size = link.size || 'N/A';
-                    const directLink = link.link;
+                    const qKey = link.quality.toUpperCase().replace(/\s/g, '');
+                    let priority = 0;
+                    if (qKey.includes('1080P') || qKey.includes('FHD')) priority = 3;
+                    else if (qKey.includes('720P') || qKey.includes('HD')) priority = 2;
+                    else if (qKey.includes('480P') || qKey.includes('SD')) priority = 1;
 
-                    if (directLink) {
-                        const qKey = quality.toUpperCase().replace(/\s/g, '');
-                        let priority = 0;
-
-                        if (qKey.includes('1080P') || qKey.includes('FHD')) priority = 3;
-                        else if (qKey.includes('720P') || qKey.includes('HD')) priority = 2;
-                        else if (qKey.includes('480P') || qKey.includes('SD')) priority = 1;
-
-                        if (!availableQualities[qKey] || availableQualities[qKey].priority < priority) {
-                            availableQualities[qKey] = { quality, size, direct_download: directLink, priority };
-                        }
+                    if (!availableQualities[qKey] || availableQualities[qKey].priority < priority) {
+                        availableQualities[qKey] = { quality: link.quality, size: link.size, direct_download: link.link, priority, episode: link.episode };
                     }
                 }
 
-                const sortedPicks = Object.values(availableQualities)
+                const picks = Object.values(availableQualities)
                     .sort((a, b) => b.priority - a.priority)
-                    .slice(0, 5);
-
-                for (let i = 0; i < sortedPicks.length; i++) {
-                    picks.push({ 'n': i + 1, ...sortedPicks[i] });
-                }
+                    .slice(0, 5)
+                    .map((p, i) => ({ n: i + 1, ...p }));
 
                 if (!picks.length) {
-                    await bot.sendMessage(from, { 'text': '❌ No usable download links found.' }, { 'quoted': incomingMessage });
+                    await bot.sendMessage(from, { text: '❌ No usable download links found.' }, { quoted: incomingMessage });
                     return;
                 }
 
                 let qualityReply = `*🎬 ${selectedFilm.title}*\n\n📥 Choose Quality:\n\n`;
                 for (const pick of picks) {
-                    qualityReply += `${pick.n}. *${pick.quality}* • ${pick.size})\n`;
+                    qualityReply += `${pick.n}. *${pick.quality}* • ${pick.size}\n`;
                 }
-                qualityReply += '\n*M O V I E*';
+                qualityReply += '\n*~https://whatsapp.com/channel/0029Vb5xFPHGE56jTnm4ZD2k~*';
 
                 const qualityMessage = await bot.sendMessage(from, {
-                    'image': { 'url': thumbnailUrl },
-                    'caption': qualityReply
-                }, { 'quoted': incomingMessage });
+                    image: { url: thumbnailUrl },
+                    caption: qualityReply
+                }, { quoted: incomingMessage });
 
-                stateMap.set(qualityMessage.key.id, { 'film': selectedFilm, 'picks': picks });
+                stateMap.set(qualityMessage.key.id, { film: selectedFilm, picks, isTvEpisode });
+
                 return;
             }
 
-            // -------------------------
-            // ✅ Download Section (Pixeldrain fix included)
-            // -------------------------
+            // Quality selected
             if (stateMap.has(quotedId)) {
-                const { film, picks } = stateMap.get(quotedId);
-                const selectedQuality = picks.find(item => item.n === parseInt(text));
-
+                const { film, picks, isTvEpisode } = stateMap.get(quotedId);
+                const selectedQuality = picks.find(p => p.n === parseInt(text));
                 if (!selectedQuality) {
-                    await bot.sendMessage(from, { 'text': '❌ Wrong quality.' }, { 'quoted': incomingMessage });
+                    await bot.sendMessage(from, { text: '❌ Wrong quality.' }, { quoted: incomingMessage });
                     return;
                 }
 
-                const sizeLower = selectedQuality.size ? selectedQuality.size.toLowerCase() : '0mb';
-                let sizeInGB = 3; 
-                if (sizeLower.includes('gb')) sizeInGB = parseFloat(sizeLower) || 3;
-                else if (sizeLower.includes('mb')) sizeInGB = (parseFloat(sizeLower) || 0) / 1024;
-
-                if (sizeInGB > 2) { 
-                    await bot.sendMessage(from, { 'text': `⚠️ Too large (${selectedQuality.size}). Direct link:\n` + selectedQuality.direct_download }, { 'quoted': incomingMessage });
-                    return;
-                }
-
-                const safeTitle = film.title.replace(/[\\/:*?"<>|]/g, '');
-                const fileName = `🎥 ${safeTitle}.${selectedQuality.quality || 'DL'}.mp4`;
-
-                try {
-                    const fixedUrl = fixPixelDrain(selectedQuality.direct_download);
-
-                    const fileBuffer = await axios.get(fixedUrl, {
-                        responseType: 'arraybuffer',
-                        headers: {
-                            "User-Agent": "Mozilla/5.0",
-                            "Accept": "*/*"
-                        },
-                        maxRedirects: 5,
-                        timeout: 60000
-                    }).then(res => res.data);
-
-                    await bot.sendMessage(from, {
-                        document: fileBuffer,
-                        mimetype: 'video/mp4',
-                        fileName: fileName,
-                        caption: `*🎬 ${film.title}*\n*📊 Quality: ${selectedQuality.quality} • Size: ${selectedQuality.size || 'N/A'}\n\n${config.MOVIE_FOOTER}`
-                    }, { quoted: incomingMessage });
-
+                // Multi-episode download for TV shows
+                if (isTvEpisode) {
+                    for (const ep of downloadLinks.filter(l => l.quality === selectedQuality.quality)) {
+                        const fileBuffer = await axios.get(fixPixelDrain(ep.link), { responseType: 'arraybuffer', timeout: 60000 }).then(r => r.data);
+                        await bot.sendMessage(from, {
+                            document: fileBuffer,
+                            mimetype: 'video/mp4',
+                            fileName: `🎥 ${film.title} • ${ep.episode}.${selectedQuality.quality}.mp4`,
+                            caption: `🎬 ${film.title} • ${ep.episode} • ${selectedQuality.quality}\n${config.MOVIE_FOOTER}`
+                        }, { quoted: incomingMessage });
+                    }
                     await bot.sendMessage(from, { react: { text: "✅", key: incomingMessage.key } });
-
-                } catch (err) {
-                    await bot.sendMessage(from, {
-                        text: "❌ Failed to send file.\n🌐 Direct link:\n" + selectedQuality.direct_download
-                    }, { quoted: incomingMessage });
+                    return;
                 }
+
+                // Single movie download
+                const fileBuffer = await axios.get(fixPixelDrain(selectedQuality.direct_download), { responseType: 'arraybuffer', timeout: 60000 }).then(r => r.data);
+                await bot.sendMessage(from, {
+                    document: fileBuffer,
+                    mimetype: 'video/mp4',
+                    fileName: `🎥 ${film.title}.${selectedQuality.quality}.mp4`,
+                    caption: `🎬 ${film.title} • ${selectedQuality.quality}\n${config.MOVIE_FOOTER}`
+                }, { quoted: incomingMessage });
+
+                await bot.sendMessage(from, { react: { text: "✅", key: incomingMessage.key } });
             }
         };
 
         bot.ev.on('messages.upsert', selectionHandler);
 
-    } catch (error) {
-        l(error);
-        await bot.sendMessage(from, { 'text': '❌ Error: ' + error.message }, { 'quoted': message });
+    } catch (err) {
+        l(err);
+        await bot.sendMessage(from, { text: '❌ Error: ' + err.message }, { quoted: message });
     }
 });
