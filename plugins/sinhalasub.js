@@ -61,8 +61,8 @@ cmd({
                 }
             }
 
-            // [වැදගත් වෙනස්කම 1]: 'data' වෙනුවට 'results' යොදා ඇත (API Structure එකට අනුව නිවැරදි කිරීමට)
-            if (!searchData?.status || !searchData.results?.length) { 
+            // [FIX]: Check if the main 'searchData' or the nested 'data' array is missing/empty.
+            if (!searchData || !searchData.data || searchData.data.length === 0) { 
                 throw new Error('No results found.');
             }
 
@@ -70,8 +70,8 @@ cmd({
         }
 
         // 3. Process and display results
-        // [වැදගත් වෙනස්කම 2]: 'data' වෙනුවට 'results' යොදා ඇත
-        const searchResults = searchData.results.map((item, index) => ({
+        // [FIX]: Map from the 'data' array.
+        const searchResults = searchData.data.map((item, index) => ({
             n: index + 1,
             title: item.title,
             imdb: item.imdb,
