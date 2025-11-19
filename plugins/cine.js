@@ -1,5 +1,5 @@
 /*
- * Cinesubz Bot Command – FULL DETAIL + 100% REPLY BASED + ERROR FIXED
+ * Cinesubz Bot Command – FULL DETAIL + 100% REPLY BASED + ALL ERRORS FIXED
  */
 
 const l = console.log;
@@ -20,9 +20,9 @@ const DOWNLOAD_API = `${API_BASE}/downloadurl?`;
 
 const cache = new NodeCache({ stdTTL: 600 }); // Cache for 10 minutes
 
-// Helper function to extract type (movie or tvshow) - **ERROR FIX INCLUDED**
+// Helper function to extract type (movie or tvshow) - FIXED 'includes' error
 function getMediaType(url) {
-    // URL එකක් string එකක් බවට සහතික කිරීම
+    // Check if url is a non-empty string before using includes()
     if (typeof url !== 'string' || !url) return 'movie'; 
     
     if (url.includes("/episodes/")) return 'episode';
@@ -61,7 +61,7 @@ cmd({
                 title: it.Title,
                 link: it.Link,
                 image: it.Image || it.image,
-                type: getMediaType(it.Link) // Link is checked for safety here
+                type: getMediaType(it.Link)
             }));
 
             cache.set(key, data);
@@ -81,13 +81,28 @@ cmd({
         // Setup handler to listen for all subsequent replies
         const handler = async ({ messages }) => {
             const m = messages?.[0];
-            const text = m?.message?.extendedTextMessage?.text?.trim();
+            
+            // Get text safely, checking both extendedTextMessage (reply) and conversation (normal message)
+            const replyText = m?.message?.extendedTextMessage?.text?.trim();
+            const normalText = m?.message?.conversation?.trim();
+            const text = replyText || normalText;
+
             const quotedId = m?.message?.extendedTextMessage?.contextInfo?.stanzaId;
-            if (!text || !quotedId) return;
+            
+            // If it's a normal message that isn't a command, or if key info is missing, exit
+            if (!text || !quotedId) return; 
 
             // --- 1. SEARCH RESULT SELECTION (Replied to searchMsg) ---
             if (quotedId === searchMsg.key.id) {
-                const pick = data.find(x => x.n === parseInt(text));
+                const selectedNumber = parseInt(text); // Convert reply text to number
+                
+                // Check if the input is a valid number - FIXED 'toString' related errors
+                if (isNaN(selectedNumber)) {
+                    await bot.sendMessage(from, { text: "❌ Invalid input. Please reply with a valid number." }, { quoted: m });
+                    return;
+                }
+
+                const pick = data.find(x => x.n === selectedNumber);
                 if (!pick) {
                     await bot.sendMessage(from, { text: "❌ Invalid number. Please reply with a valid serial number." }, { quoted: m });
                     return;
@@ -160,7 +175,6 @@ cmd({
                     }));
                 }
                 
-                // Add note about the next step
                 details += "\n--- *Next, choose the quality/episode in the message below.* ---";
 
                 // Send Detail Message
@@ -199,7 +213,15 @@ cmd({
             if (state.has(quotedId)) {
                 const { qList, pick, mediaType } = state.get(quotedId);
 
-                const chosen = qList.find(x => x.n === parseInt(text));
+                const selectedNumber = parseInt(text);
+                
+                // Check if the input is a valid number - FIXED 'toString' related errors
+                if (isNaN(selectedNumber)) {
+                    await bot.sendMessage(from, { text: "❌ Invalid input. Please reply with a number." }, { quoted: m });
+                    return;
+                }
+
+                const chosen = qList.find(x => x.n === selectedNumber);
                 if (!chosen) {
                     await bot.sendMessage(from, { text: "❌ Invalid selection number." }, { quoted: m });
                     return;
@@ -234,7 +256,7 @@ cmd({
                         // Send new quality selection message for the episode
                         let newQTxt = `*📥 Choose Quality for: ${chosen.title}*\n\n`;
                         for (const q of newQList) newQTxt += `${q.n} ❱❱ **${q.quality}** ➛ _${q.size}_\n`;
-                        newQTxt += "\n⭐❰ZOMBIE MOVIE❱⭐";
+                        newQTxt += "\n⭐❰ASITHA MOVIE❱⭐";
                         
                         const newQMsg = await bot.sendMessage(from, {
                             caption: newQTxt,
