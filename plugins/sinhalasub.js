@@ -1,6 +1,6 @@
 /*
- * SinhalaSub Bot – FULL PREMIUM COMMAND
- * Official OMDb API Integrated
+ * SinhalaSub Bot – Only SinhalaSub API
+ * 20 Search Results + Next Page + Quality Select
  */
 
 const l = console.log;
@@ -9,8 +9,7 @@ const { cmd } = require('../command');
 const axios = require('axios');
 const NodeCache = require('node-cache');
 
-const API_KEY = 'c56182a993f60b4f49cf97ab09886d17'; // SinhalaSub API
-const OMDB_API_KEY = '3030b6ae'; // Your OMDb API Key
+const API_KEY = 'c56182a993f60b4f49cf97ab09886d17';
 const SEARCH_API = 'https://sadaslk-apis.vercel.app/api/v1/movie/sinhalasub/search?';
 const MOVIE_DL_API = 'https://sadaslk-apis.vercel.app/api/v1/movie/sinhalasub/infodl?';
 const TV_DL_API   = 'https://sadaslk-apis.vercel.app/api/v1/movie/sinhalasub/tv/dl?';
@@ -23,28 +22,16 @@ function fixPixelDrain(url) {
     return `https://pixeldrain.com/api/file/${id}?download`;
 }
 
-// Auto-clean title for OMDb search
-function cleanTitle(title) {
-    let t = title.replace(/Sinhala Subtitles|සිංහල උපසිරසි/gi, '');
-    t = t.replace(/\([0-9]{4}\)/g, match => match); // Keep year
-    t = t.replace(/S[0-9]{1,2}E[0-9]{1,2}/gi, ''); // Remove episode numbers
-    t = t.replace(/[^a-zA-Z0-9\s]/g, ''); // Remove symbols
-    t = t.replace(/\s+/g, ' ').trim();
-    return t;
-}
-
 cmd({
     pattern: 'sinhalasub',
     react: '🎬',
-    desc: 'Download Sinhala Sub Movies with FULL DETAILS',
+    desc: 'Download Sinhala Sub Movies (SinhalaSub API Only)',
     category: 'download',
     filename: __filename
 }, async (bot, msg, ctx, { from, q }) => {
 
     if (!q) {
-        await bot.sendMessage(from, {
-            text: "Usage:\n.sinhalasub Avatar\n.sinhalasub Breaking Bad"
-        }, { quoted: msg });
+        await bot.sendMessage(from, { text: "Usage:\n.sinhalasub Avatar\n.sinhalasub Breaking Bad" }, { quoted: msg });
         return;
     }
 
@@ -53,19 +40,24 @@ cmd({
         const key = `search_${q.toLowerCase()}`;
         let data = cache.get(key) || { results: [], page: 1 };
 
-        // Fetch if cache empty or new search
+        // Fetch if cache empty
         if (!data.results.length) {
             const url = `${SEARCH_API}q=${encodeURIComponent(q)}&apiKey=${API_KEY}`;
-            const api = await axios.get(url);
+            const api = await axios.get(url, { timeout: 10000 });
             const list = api.data?.data || [];
             if (!list.length) throw new Error("❌ No results found.");
 
             data.results = list.map((it, i) => ({
                 n: i + 1,
                 title: it.Title || it.title,
+                year: it.Year || it.year || 'N/A',
+                imdb: it.Rating || it.imdb || 'N/A',
+                genre: it.Genre || it.genre || 'N/A',
+                plot: it.Plot || it.plot || 'N/A',
                 link: it.Link || it.link,
-                image: it.Img || it.image
+                image: it.Img || it.image || 'https://i.imgur.com/SL4nVxv.png'
             }));
+
             cache.set(key, data);
         }
 
@@ -98,11 +90,11 @@ cmd({
                 cache.set(key, data);
                 await bot.sendMessage(from, { text: `📄 Loading Page ${data.page}...` }, { quoted: m });
                 bot.ev.off("messages.upsert", handler);
-                cmd({ pattern: 'sinhalasub', react: '🎬', desc: '', category: '', filename: __filename }, async (bot2, msg2, ctx2, { from: from2, q: q2 }) => {}); // Re-run command
+                cmd({ pattern: 'sinhalasub', react: '🎬', desc: '', category: '', filename: __filename }, async () => {}); // Re-run command
                 return;
             }
 
-            // ----- SELECT MOVIE -----
+            // Select Movie
             if (quotedId === searchMsg.key.id) {
                 const pick = data.results.find(x => x.n === parseInt(text));
                 if (!pick) {
@@ -111,61 +103,35 @@ cmd({
                 }
 
                 const isTV = pick.link.includes("/episodes/");
-                const infoURL = (isTV ? TV_DL_API : MOVIE_DL_API) + 
-                                `q=${encodeURIComponent(pick.link)}&apiKey=${API_KEY}`;
+                const infoURL = (isTV ? TV_DL_API : MOVIE_DL_API) + `q=${encodeURIComponent(pick.link)}&apiKey=${API_KEY}`;
 
                 let info;
                 try {
-                    info = await axios.get(infoURL);
+                    info = await axios.get(infoURL, { timeout: 10000 });
                     info = info.data;
                 } catch {
                     await bot.sendMessage(from, { text: "❌ Failed to load movie info." }, { quoted: m });
                     return;
                 }
 
-                // OMDb API fetch
-                const cleanSearch = cleanTitle(pick.title);
-                let omdbData = {};
-                try {
-                    const omdbResp = await axios.get(`http://www.omdbapi.com/?t=${encodeURIComponent(cleanSearch)}&apikey=${OMDB_API_KEY}`);
-                    omdbData = omdbResp.data;
-                } catch {}
+                const d = info.data || {};
+                const full = d.details || d || {};
 
-                const full = {
-                    title: omdbData.Title || pick.title,
-                    imdb: omdbData.imdbRating || "N/A",
-                    year: omdbData.Year || "N/A",
-                    genre: omdbData.Genre || "N/A",
-                    plot: omdbData.Plot || "N/A",
-                    actors: omdbData.Actors || "N/A",
-                    director: omdbData.Director || "N/A",
-                    country: omdbData.Country || "N/A",
-                    language: omdbData.Language || "N/A",
-                    image: omdbData.Poster || pick.image
-                };
-
-                let details = `*🎬 ${full.title}*\n\n`;
-                details += full.imdb !== "N/A" ? `⭐ IMDb: ${full.imdb}\n` : '';
-                details += full.year !== "N/A" ? `📅 Year: ${full.year}\n` : '';
-                details += full.genre !== "N/A" ? `🎭 Genre: ${full.genre}\n` : '';
-                details += full.actors !== "N/A" ? `👩‍💼 Actors: ${full.actors}\n` : '';
-                details += full.director !== "N/A" ? `🎬 Director: ${full.director}\n` : '';
-                details += full.country !== "N/A" ? `🌍 Country: ${full.country}\n` : '';
-                details += full.language !== "N/A" ? `🗣️ Language: ${full.language}\n` : '';
-                details += full.plot !== "N/A" ? `\n📝 *Plot:* ${full.plot}\n` : '';
+                let details = `*🎬 ${full.title || pick.title}*\n\n`;
+                if (full.imdb && full.imdb !== "N/A") details += `⭐ IMDb: ${full.imdb}\n`;
+                if (full.year && full.year !== "N/A") details += `📅 Year: ${full.year}\n`;
+                if (full.genre && full.genre !== "N/A") details += `🎭 Genre: ${full.genre}\n`;
+                if (full.plot && full.plot !== "N/A") details += `\n📝 *Plot:* ${full.plot}\n`;
 
                 const infoMsg = await bot.sendMessage(from, {
-                    image: { url: full.image },
+                    image: { url: full.image || pick.image },
                     caption: details
                 }, { quoted: m });
 
                 // Prepare quality links
                 let links = [];
-                if (isTV) {
-                    links = info.data?.episodes || [];
-                } else {
-                    links = info.data?.downloadLinks || [];
-                }
+                if (isTV) links = info.data?.episodes || [];
+                else links = info.data?.downloadLinks || [];
 
                 const qList = links.map((x, i) => ({
                     n: i + 1,
@@ -180,14 +146,14 @@ cmd({
 
                 const qMsg = await bot.sendMessage(from, {
                     caption: qTxt,
-                    image: { url: full.image }
+                    image: { url: full.image || pick.image }
                 });
 
                 state.set(qMsg.key.id, { qList, pick, isTV });
                 return;
             }
 
-            // ----- QUALITY SELECT -----
+            // Quality Select
             if (state.has(quotedId)) {
                 const { qList, pick } = state.get(quotedId);
                 const chosen = qList.find(x => x.n === parseInt(text));
@@ -196,10 +162,7 @@ cmd({
                     return;
                 }
 
-                const buffer = await axios.get(
-                    fixPixelDrain(chosen.link),
-                    { responseType: "arraybuffer" }
-                ).then(r => r.data);
+                const buffer = await axios.get(fixPixelDrain(chosen.link), { responseType: "arraybuffer", timeout: 60000 }).then(r => r.data);
 
                 await bot.sendMessage(from, {
                     document: buffer,
