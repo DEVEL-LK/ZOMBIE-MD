@@ -1,6 +1,6 @@
 /*
  * SinhalaSub Bot – FULL PREMIUM COMMAND
- * Search 20 Results → Next Page → Full OMDb Details → Quality Select → Download
+ * Official OMDb API Integrated
  */
 
 const l = console.log;
@@ -9,7 +9,8 @@ const { cmd } = require('../command');
 const axios = require('axios');
 const NodeCache = require('node-cache');
 
-const API_KEY = 'c56182a993f60b4f49cf97ab09886d17';
+const API_KEY = 'c56182a993f60b4f49cf97ab09886d17'; // SinhalaSub API
+const OMDB_API_KEY = '3030b6ae'; // Your OMDb API Key
 const SEARCH_API = 'https://sadaslk-apis.vercel.app/api/v1/movie/sinhalasub/search?';
 const MOVIE_DL_API = 'https://sadaslk-apis.vercel.app/api/v1/movie/sinhalasub/infodl?';
 const TV_DL_API   = 'https://sadaslk-apis.vercel.app/api/v1/movie/sinhalasub/tv/dl?';
@@ -122,11 +123,12 @@ cmd({
                     return;
                 }
 
+                // OMDb API fetch
                 const cleanSearch = cleanTitle(pick.title);
                 let omdbData = {};
                 try {
-                    const omdbResp = await axios.get(`https://omdbapi.b-cdn.net/?t=${encodeURIComponent(cleanSearch)}`);
-                    omdbData = omdbResp.data || {};
+                    const omdbResp = await axios.get(`http://www.omdbapi.com/?t=${encodeURIComponent(cleanSearch)}&apikey=${OMDB_API_KEY}`);
+                    omdbData = omdbResp.data;
                 } catch {}
 
                 const full = {
