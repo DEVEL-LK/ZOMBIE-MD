@@ -17,7 +17,7 @@ const TV_DL_API   = 'https://foreign-marna-sithaunarathnapromax-9a005c2e.koyeb.a
 const cache = new NodeCache({ stdTTL: 60 });
 
 cmd({
-    pattern: 'sinhalasub',
+    pattern: 'cine',
     react: '🎬',
     desc: 'Download Sinhala Sub Movies',
     category: 'download',
