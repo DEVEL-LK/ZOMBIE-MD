@@ -1,20 +1,15 @@
 /*
- * SinhalaSub Bot – Only SinhalaSub API
- * 20 Search Results + Next Page + Quality Select
+ * SinhalaSub Baiscopes Bot – FULL DETAIL + REPLY FIX + PAGINATION
  */
 
 const l = console.log;
 const config = require('../config'); 
 const { cmd } = require('../command');
 const axios = require('axios');
-const NodeCache = require('node-cache');
 
 const API_KEY = 'c56182a993f60b4f49cf97ab09886d17';
-const SEARCH_API = 'https://sadaslk-apis.vercel.app/api/v1/movie/sinhalasub/search?';
-const MOVIE_DL_API = 'https://sadaslk-apis.vercel.app/api/v1/movie/sinhalasub/infodl?';
-const TV_DL_API   = 'https://sadaslk-apis.vercel.app/api/v1/movie/sinhalasub/tv/dl?';
-
-const cache = new NodeCache({ stdTTL: 60 });
+const SEARCH_API = 'https://sadaslk-apis.vercel.app/api/v1/movie/baiscopes/search?';
+const INFO_DL_API = 'https://sadaslk-apis.vercel.app/api/v1/movie/baiscopes/infodl?';
 
 function fixPixelDrain(url) {
     if (!url.includes("/u/")) return url;
@@ -23,159 +18,125 @@ function fixPixelDrain(url) {
 }
 
 cmd({
-    pattern: 'sinhalasub',
+    pattern: 'baiscopes',
     react: '🎬',
-    desc: 'Download Sinhala Sub Movies (SinhalaSub API Only)',
+    desc: 'Download Sinhala Sub Movies from Baiscopes',
     category: 'download',
     filename: __filename
-}, async (bot, msg, ctx, { from, q }) => {
+}, async (bot, msg, ctx, { from, q, sender }) => {
 
     if (!q) {
-        await bot.sendMessage(from, { text: "Usage:\n.sinhalasub Avatar\n.sinhalasub Breaking Bad" }, { quoted: msg });
+        await bot.sendMessage(from, {
+            text: "Usage:\n.baiscopes movie name"
+        }, { quoted: msg });
         return;
     }
 
     try {
+        const url = `${SEARCH_API}q=${encodeURIComponent(q)}&apiKey=${API_KEY}`;
+        const api = await axios.get(url);
+        const list = api.data?.data || [];
+
+        if (!list.length) throw new Error("❌ No results found.");
+
+        // pagination setup
         const pageSize = 20;
-        const key = `search_${q.toLowerCase()}`;
-        let data = cache.get(key) || { results: [], page: 1 };
+        let page = 0;
+        const totalPages = Math.ceil(list.length / pageSize);
 
-        // Fetch if cache empty
-        if (!data.results.length) {
-            const url = `${SEARCH_API}q=${encodeURIComponent(q)}&apiKey=${API_KEY}`;
-            const api = await axios.get(url, { timeout: 10000 });
-            const list = api.data?.data || [];
-            if (!list.length) throw new Error("❌ No results found.");
+        const getPage = (p) => list.slice(p * pageSize, (p + 1) * pageSize);
 
-            data.results = list.map((it, i) => ({
-                n: i + 1,
-                title: it.Title || it.title,
-                year: it.Year || it.year || 'N/A',
-                imdb: it.Rating || it.imdb || 'N/A',
-                genre: it.Genre || it.genre || 'N/A',
-                plot: it.Plot || it.plot || 'N/A',
-                link: it.Link || it.link,
-                image: it.Img || it.image || 'https://i.imgur.com/SL4nVxv.png'
-            }));
+        // send first page
+        const sendPage = async (p) => {
+            const pageData = getPage(p);
+            let txt = `*🎬 SEARCH RESULTS* (Page ${p + 1}/${totalPages})\n\n`;
+            for (const r of pageData) txt += `${r.index}. ${r.title}\n`;
+            if (p < totalPages - 1) txt += `\n➡ Reply "next" for next page.`;
+            txt += `\n\nReply with Number`;
 
-            cache.set(key, data);
-        }
-
-        const currentPage = data.page;
-        const start = (currentPage - 1) * pageSize;
-        const end = start + pageSize;
-        const pageResults = data.results.slice(start, end);
-
-        let txt = `*🎬 SEARCH RESULTS (Page ${currentPage})*\n\n`;
-        pageResults.forEach(r => txt += `${r.n}. ${r.title}\n`);
-        if (data.results.length > end) txt += `\nReply 21 → Next Page`;
-        txt += "\n\nReply with Number";
-
-        const searchMsg = await bot.sendMessage(from, {
-            image: { url: pageResults[0].image },
-            caption: txt
-        }, { quoted: msg });
-
-        const state = new Map();
-
-        const handler = async ({ messages }) => {
-            const m = messages?.[0];
-            const text = m?.message?.extendedTextMessage?.text?.trim();
-            const quotedId = m?.message?.extendedTextMessage?.contextInfo?.stanzaId;
-            if (!text || !quotedId) return;
-
-            // Next Page
-            if (text === "21" && quotedId === searchMsg.key.id) {
-                data.page += 1;
-                cache.set(key, data);
-                await bot.sendMessage(from, { text: `📄 Loading Page ${data.page}...` }, { quoted: m });
-                bot.ev.off("messages.upsert", handler);
-                cmd({ pattern: 'sinhalasub', react: '🎬', desc: '', category: '', filename: __filename }, async () => {}); // Re-run command
-                return;
-            }
-
-            // Select Movie
-            if (quotedId === searchMsg.key.id) {
-                const pick = data.results.find(x => x.n === parseInt(text));
-                if (!pick) {
-                    await bot.sendMessage(from, { text: "❌ Invalid number." }, { quoted: m });
-                    return;
-                }
-
-                const isTV = pick.link.includes("/episodes/");
-                const infoURL = (isTV ? TV_DL_API : MOVIE_DL_API) + `q=${encodeURIComponent(pick.link)}&apiKey=${API_KEY}`;
-
-                let info;
-                try {
-                    info = await axios.get(infoURL, { timeout: 10000 });
-                    info = info.data;
-                } catch {
-                    await bot.sendMessage(from, { text: "❌ Failed to load movie info." }, { quoted: m });
-                    return;
-                }
-
-                const d = info.data || {};
-                const full = d.details || d || {};
-
-                let details = `*🎬 ${full.title || pick.title}*\n\n`;
-                if (full.imdb && full.imdb !== "N/A") details += `⭐ IMDb: ${full.imdb}\n`;
-                if (full.year && full.year !== "N/A") details += `📅 Year: ${full.year}\n`;
-                if (full.genre && full.genre !== "N/A") details += `🎭 Genre: ${full.genre}\n`;
-                if (full.plot && full.plot !== "N/A") details += `\n📝 *Plot:* ${full.plot}\n`;
-
-                const infoMsg = await bot.sendMessage(from, {
-                    image: { url: full.image || pick.image },
-                    caption: details
-                }, { quoted: m });
-
-                // Prepare quality links
-                let links = [];
-                if (isTV) links = info.data?.episodes || [];
-                else links = info.data?.downloadLinks || [];
-
-                const qList = links.map((x, i) => ({
-                    n: i + 1,
-                    quality: x.quality || x.q,
-                    size: x.size || "Unknown",
-                    link: x.finalDownloadUrl || x.link,
-                    episode: x.episode
-                }));
-
-                let qTxt = "*📥 Choose Quality*\n\n";
-                for (const q of qList) qTxt += `${q.n}. ${q.quality} • ${q.size}\n`;
-
-                const qMsg = await bot.sendMessage(from, {
-                    caption: qTxt,
-                    image: { url: full.image || pick.image }
-                });
-
-                state.set(qMsg.key.id, { qList, pick, isTV });
-                return;
-            }
-
-            // Quality Select
-            if (state.has(quotedId)) {
-                const { qList, pick } = state.get(quotedId);
-                const chosen = qList.find(x => x.n === parseInt(text));
-                if (!chosen) {
-                    await bot.sendMessage(from, { text: "❌ Wrong Quality." }, { quoted: m });
-                    return;
-                }
-
-                const buffer = await axios.get(fixPixelDrain(chosen.link), { responseType: "arraybuffer", timeout: 60000 }).then(r => r.data);
-
-                await bot.sendMessage(from, {
-                    document: buffer,
-                    mimetype: "video/mp4",
-                    fileName: `${pick.title} - ${chosen.quality}.mp4`,
-                    caption: `🎬 ${pick.title}\n📥 ${chosen.quality}`
-                }, { quoted: m });
-
-                await bot.sendMessage(from, { react: { text: "✅", key: m.key } });
-            }
+            return await bot.sendMessage(from, {
+                image: { url: pageData[0].imageUrl },
+                caption: txt
+            }, { quoted: msg });
         };
 
-        bot.ev.on("messages.upsert", handler);
+        const searchMsg = await sendPage(page);
+
+        // state per user + searchMsg
+        const state = new Map();
+        state.set(sender + searchMsg.key.id, { list, page, searchMsg });
+
+        // message listener
+        bot.ev.on("messages.upsert", async ({ messages }) => {
+            const m = messages?.[0];
+            const userId = m.key?.remoteJid || sender;
+            const text = m.message?.extendedTextMessage?.text || m.message?.conversation;
+            const quotedId = m.message?.extendedTextMessage?.contextInfo?.stanzaId || m.message?.extendedTextMessage?.contextInfo?.quotedMessage?.key?.id;
+
+            if (!text || !quotedId) return;
+
+            const userState = state.get(userId + quotedId);
+            if (!userState) return;
+
+            const { list, searchMsg } = userState;
+            let page = userState.page;
+
+            // handle next page
+            if (text.toLowerCase() === 'next') {
+                if ((page + 1) >= totalPages) {
+                    await bot.sendMessage(from, { text: "❌ No more pages." }, { quoted: m });
+                    return;
+                }
+                page += 1;
+                userState.page = page;
+                await sendPage(page);
+                return;
+            }
+
+            // handle number select
+            const pickedIndex = parseInt(text);
+            const pick = list.find(x => x.index === pickedIndex);
+            if (!pick) {
+                await bot.sendMessage(from, { text: "❌ Invalid number." }, { quoted: m });
+                return;
+            }
+
+            // fetch movie info + download links
+            const infoUrl = `${INFO_DL_API}q=${encodeURIComponent(pick.link)}&apiKey=${API_KEY}`;
+            let info;
+            try {
+                info = await axios.get(infoUrl);
+                info = info.data?.data;
+            } catch {
+                await bot.sendMessage(from, { text: "❌ Failed to fetch movie info." }, { quoted: m });
+                return;
+            }
+
+            const mi = info.movieInfo;
+            const dl = info.downloadLinks || [];
+
+            let details = `*🎬 ${mi.title}*\n\n`;
+            if (mi.releaseDate) details += `📅 Release Date: ${mi.releaseDate}\n`;
+            if (mi.country) details += `🌍 Country: ${mi.country}\n`;
+            if (mi.runtime) details += `⏱ Runtime: ${mi.runtime}\n`;
+            if (mi.genres && mi.genres.length) details += `🎭 Genres: ${mi.genres.join(', ')}\n`;
+            if (mi.ratingValue) details += `⭐ IMDb: ${mi.ratingValue}\n`;
+            if (mi.summary) details += `\n📝 Summary: ${mi.summary}\n`;
+
+            // send movie info
+            await bot.sendMessage(from, {
+                image: { url: mi.posterUrl },
+                caption: details
+            }, { quoted: m });
+
+            // send download links
+            let qTxt = "*📥 Download Links*\n\n";
+            dl.forEach((d, i) => {
+                qTxt += `${i + 1}. ${d.quality || 'HD'} • ${d.size || ''}\n${d.directLinkUrl}\n\n`;
+            });
+
+            await bot.sendMessage(from, { text: qTxt }, { quoted: m });
+        });
 
     } catch (e) {
         await bot.sendMessage(from, { text: "❌ Error: " + e.message }, { quoted: msg });
