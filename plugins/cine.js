@@ -1,5 +1,5 @@
 /*
- * Cinesubz Bot Command – FULL DETAIL + 100% REPLY BASED + ALL ERRORS FIXED
+ * NOTE: Original variable/function names preserved
  */
 
 const l = console.log;
@@ -8,315 +8,203 @@ const { cmd } = require('../command');
 const axios = require('axios');
 const NodeCache = require('node-cache');
 
-// --- Cinesubz API Configuration ---
-const API_BASE = 'https://foreign-marna-sithaunarathnapromax-9a005c2e.koyeb.app/api/cinesubz';
 const API_KEY = '25f974dba76310042bcd3c9488eec9093816ef32eb36d34c1b6b875ac9215932';
+const SEARCH_API = 'https://foreign-marna-sithaunarathnapromax-9a005c2e.koyeb.app/api/cinesubz/search?q=';
+const MOVIE_DL_API = 'https://foreign-marna-sithaunarathnapromax-9a005c2e.koyeb.app/api/cinesubz/movie-details?url=';
+const TV_DL_API = 'https://foreign-marna-sithaunarathnapromax-9a005c2e.koyeb.app/api/cinesubz/tvshow-details?url=';
 
-const SEARCH_API = `${API_BASE}/search?`;
-const MOVIE_DETAIL_API = `${API_BASE}/movie-details?`;
-const TVSHOW_DETAIL_API = `${API_BASE}/tvshow-details?`;
-const EPISODE_DETAIL_API = `${API_BASE}/episode-details?`;
-const DOWNLOAD_API = `${API_BASE}/downloadurl?`;
+const searchCache = new NodeCache({ 'stdTTL': 60, 'checkperiod': 120 });
+const BRAND = config.MOVIE_FOOTER;
 
-const cache = new NodeCache({ stdTTL: 600 }); // Cache for 10 minutes
-
-// Helper function to extract type (movie or tvshow) - FIXED 'includes' error
-function getMediaType(url) {
-    // Check if url is a non-empty string before using includes()
-    if (typeof url !== 'string' || !url) return 'movie'; 
-    
-    if (url.includes("/episodes/")) return 'episode';
-    if (url.includes("/tvshows/")) return 'tvshow';
-    return 'movie';
+// -------------------------
+// ✅ Pixeldrain direct download fix
+// -------------------------
+function fixPixelDrain(url) {
+    if (!url.includes("/u/")) return url; // Already direct or other host
+    const id = url.split("/u/")[1];
+    return `https://pixeldrain.com/api/file/${id}?download`;
 }
 
 cmd({
-    pattern: 'cinesubz',
-    react: '🍿',
-    desc: 'Download Sinhala Sub Movies/TV Shows from Cinesubz',
-    category: 'download',
-    filename: __filename
-}, async (bot, msg, ctx, { from, q }) => {
+    'pattern': 'cinesubz',
+    'react': '🎬',
+    'desc': 'Search and download Movies/TV Series from Cinesubz',
+    'category': 'download',
+    'filename': __filename
+}, async (bot, message, context, { from, q: searchQuery }) => {
 
-    if (!q) {
+    if (!searchQuery) {
         await bot.sendMessage(from, {
-            text: "Usage:\n.cinesubz Avatar\n.cinesubz Peaky Blinders"
-        }, { quoted: msg });
+            'text': '*💡 Type Your Movie ㋡*\n\n📋 Usage: .cinesubz <search term>\n📝 Example: .cinesubz Breaking Bad\n\n' + '*🎬 Movie / TV Series Search*'
+        }, { 'quoted': message });
         return;
     }
 
     try {
-        const key = "cinesubz_search_" + q.toLowerCase();
-        let data = cache.get(key);
+        const cacheKey = 'film_' + searchQuery.toLowerCase().trim();
+        let apiData = searchCache.get(cacheKey);
 
-        if (!data) {
-            const url = `${SEARCH_API}q=${encodeURIComponent(q)}&apiKey=${API_KEY}`;
-            const api = await axios.get(url);
-            const list = api.data?.data || [];
+        if (!apiData) {
+            const searchUrl = `${SEARCH_API}${encodeURIComponent(searchQuery)}&apiKey=${API_KEY}`;
+            
+            let retries = 3;
+            while (retries--) {
+                try {
+                    const response = await axios.get(searchUrl, { 'timeout': 10000 });
+                    apiData = response.data;
+                    break;
+                } catch (error) {
+                    if (!retries) throw new Error('❌ Fetch failed.');
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                }
+            }
 
-            if (!list.length) throw new Error("❌ No results found on Cinesubz.");
-
-            data = list.map((it, i) => ({
-                n: i + 1,
-                title: it.Title,
-                link: it.Link,
-                image: it.Image || it.image,
-                type: getMediaType(it.Link)
-            }));
-
-            cache.set(key, data);
+            if (!apiData?.status || !apiData?.data?.length) throw new Error('No results found.');
+            searchCache.set(cacheKey, apiData);
         }
 
-        let txt = "*🍿 CINESUBZ SEARCH RESULTS*\n\n";
-        for (const r of data) txt += `${r.n}. [${r.type.toUpperCase()}] ${r.title}\n`;
-        txt += "\nReply with the *Number* to view details.";
+        const results = apiData.data.map((item, index) => ({
+            'n': index + 1,
+            'title': item.Title,
+            'imdb': item.Rating || 'N/A',
+            'year': item.Year || 'N/A',
+            'link': item.Link,
+            'image': item.Img
+        }));
 
-        const searchMsg = await bot.sendMessage(from, {
-            image: { url: data[0].image },
-            caption: txt
-        }, { quoted: msg });
+        let replyText = '*🎬 SEARCH RESULTS*\n\n';
+        for (const item of results) {
+            replyText += `🎬 *${item.n}. ${item.title}*\n  ⭐ Rating: ${item.imdb}\n  📅 Year: ${item.year}\n\n`;
+        }
+        replyText += '🔢 Select number 🪀';
 
-        const state = new Map();
-        
-        // Setup handler to listen for all subsequent replies
-        const handler = async ({ messages }) => {
-            const m = messages?.[0];
+        const sentMessage = await bot.sendMessage(from, {
+            'image': { 'url': results[0].image },
+            'caption': replyText
+        }, { 'quoted': message });
+
+        const stateMap = new Map();
+
+        const selectionHandler = async ({ messages }) => {
+            const incomingMessage = messages?.[0];
+            if (!incomingMessage?.message?.extendedTextMessage) return;
+
+            const text = incomingMessage.message.extendedTextMessage.text.trim();
+            const quotedId = incomingMessage.message.extendedTextMessage.contextInfo?.stanzaId;
             
-            // Get text safely, checking both extendedTextMessage (reply) and conversation (normal message)
-            const replyText = m?.message?.extendedTextMessage?.text?.trim();
-            const normalText = m?.message?.conversation?.trim();
-            const text = replyText || normalText;
-
-            const quotedId = m?.message?.extendedTextMessage?.contextInfo?.stanzaId;
-            
-            // If it's a normal message that isn't a command, or if key info is missing, exit
-            if (!text || !quotedId) return; 
-
-            // --- 1. SEARCH RESULT SELECTION (Replied to searchMsg) ---
-            if (quotedId === searchMsg.key.id) {
-                const selectedNumber = parseInt(text); // Convert reply text to number
-                
-                // Check if the input is a valid number - FIXED 'toString' related errors
-                if (isNaN(selectedNumber)) {
-                    await bot.sendMessage(from, { text: "❌ Invalid input. Please reply with a valid number." }, { quoted: m });
-                    return;
-                }
-
-                const pick = data.find(x => x.n === selectedNumber);
-                if (!pick) {
-                    await bot.sendMessage(from, { text: "❌ Invalid number. Please reply with a valid serial number." }, { quoted: m });
-                    return;
-                }
-
-                const mediaType = getMediaType(pick.link);
-                let infoURL = '';
-                
-                if (mediaType === 'tvshow') {
-                    infoURL = TVSHOW_DETAIL_API;
-                } else if (mediaType === 'episode') {
-                    infoURL = EPISODE_DETAIL_API;
-                } else { // movie
-                    infoURL = MOVIE_DETAIL_API;
-                }
-
-                infoURL += `url=${encodeURIComponent(pick.link)}&apiKey=${API_KEY}`;
-                
-                let info;
-                try {
-                    info = await axios.get(infoURL);
-                } catch (e) {
-                    l(e);
-                    await bot.sendMessage(from, { text: `❌ Failed to load ${mediaType} info.` }, { quoted: m });
-                    return;
-                }
-
-                const apiData = info.data?.data || {};
-
-                // --- Format and Send Details Message ---
-                let details = `*🍀 TITLE ➛ ${apiData.title || pick.title}*\n\n`;
-
-                if (apiData.year) details += `📅 **RELEASE Date** ➛ ${apiData.year}\n`;
-                if (apiData.country) details += `🌍 **COUNTRY** ➛ _${apiData.country}_\n`;
-                if (apiData.duration) details += `⏱️ **DURATION** ➛ _${apiData.duration}_\n`;
-                if (apiData.genre && apiData.genre.length) details += `🎦 **GENRES** ➛ _${apiData.genre.join(', ')}_\n`;
-                if (apiData.director && apiData.director.length) details += `🤵 **DIRECTOR** ➛ ${apiData.director.join(', ')}\n`;
-                if (apiData.cast && apiData.cast.length) details += `👥 **CAST** ➛ ${apiData.cast.join(', ')}\n`;
-                if (apiData.plot) details += `\n📝 *Plot:* ${apiData.plot}\n`;
-                
-                // --- Prepare Quality/Episode List ---
-                let qList = [];
-                let qTxtTitle = '';
-
-                if (mediaType === 'tvshow') {
-                    qTxtTitle = '*📥 Choose Season/Episode (Reply below number)*';
-                    qList = (apiData.episodes || []).map((x, i) => ({
-                        n: i + 1,
-                        title: x.title,
-                        link: x.link,
-                        is_episode: true
-                    }));
-                } else if (mediaType === 'episode') {
-                    qTxtTitle = '*📥 Choose Download Quality (Reply below number)*';
-                    qList = (apiData.download_links || []).map((x, i) => ({
-                        n: i + 1,
-                        quality: x.quality,
-                        size: x.size,
-                        link: x.link,
-                        is_download: true
-                    }));
-                } else { // movie
-                    qTxtTitle = '*📥 Choose Download Quality (Reply below number)*';
-                    qList = (apiData.download_links || []).map((x, i) => ({
-                        n: i + 1,
-                        quality: x.quality,
-                        size: x.size,
-                        link: x.link,
-                        is_download: true
-                    }));
-                }
-                
-                details += "\n--- *Next, choose the quality/episode in the message below.* ---";
-
-                // Send Detail Message
-                const detailMsg = await bot.sendMessage(from, {
-                    image: { url: apiData.image || pick.image },
-                    caption: details
-                }, { quoted: m });
-
-
-                if (qList.length > 0) {
-                    // Send Quality/Episode Selection Message
-                    let qTxt = `${qTxtTitle}\n\n`;
-                    for (const q of qList) {
-                        if (q.is_episode) {
-                             qTxt += `${q.n} ❱❱ **${q.title}**\n`;
-                        } else {
-                             qTxt += `${q.n} ❱❱ **${q.quality}** ➛ _${q.size}_\n`;
-                        }
-                    }
-                    qTxt += "\n⭐❰ASITHA MOVIE❱⭐";
-                    
-                    const qMsg = await bot.sendMessage(from, {
-                        caption: qTxt,
-                    }, { quoted: m }); 
-
-                    // Save state using the Quality/Episode Selection Message ID
-                    state.set(qMsg.key.id, { qList, pick, mediaType, lastSelectedLink: pick.link });
-                } else {
-                    await bot.sendMessage(from, { text: "❌ No download/episode links found for this item." }, { quoted: m });
-                }
-                
+            if (text.toLowerCase() === 'off') {
+                bot.ev.off('messages.upsert', selectionHandler);
+                stateMap.clear();
+                await bot.sendMessage(from, { 'text': 'OK.' }, { 'quoted': incomingMessage });
                 return;
             }
 
-            // --- 2. QUALITY/EPISODE SELECTION (Replied to qMsg) ---
-            if (state.has(quotedId)) {
-                const { qList, pick, mediaType } = state.get(quotedId);
+            if (quotedId === sentMessage.key.id) {
 
-                const selectedNumber = parseInt(text);
-                
-                // Check if the input is a valid number - FIXED 'toString' related errors
-                if (isNaN(selectedNumber)) {
-                    await bot.sendMessage(from, { text: "❌ Invalid input. Please reply with a number." }, { quoted: m });
+                const selectedFilm = results.find(item => item.n === parseInt(text));
+                if (!selectedFilm) {
+                    await bot.sendMessage(from, { 'text': '❌ Invalid number.' }, { 'quoted': incomingMessage });
                     return;
                 }
 
-                const chosen = qList.find(x => x.n === selectedNumber);
-                if (!chosen) {
-                    await bot.sendMessage(from, { text: "❌ Invalid selection number." }, { quoted: m });
-                    return;
-                }
-                
-                // --- If the selection is a TV Episode (needs episode-details API call) ---
-                if (chosen.is_episode) {
-                    await bot.sendMessage(from, { react: { text: "🔎", key: m.key } });
+                const isTvEpisode = selectedFilm.link.includes('/episodes/');
+                const dlBaseUrl = isTvEpisode ? TV_DL_API : MOVIE_DL_API;
+                const downloadUrl = `${dlBaseUrl}url=${encodeURIComponent(selectedFilm.link)}&apiKey=${API_KEY}`;
 
-                    const episodeInfoURL = `${EPISODE_DETAIL_API}url=${encodeURIComponent(chosen.link)}&apiKey=${API_KEY}`;
-                    let episodeInfo;
+                let downloadData;
+                let retries = 3;
+                while (retries--) {
                     try {
-                         episodeInfo = await axios.get(episodeInfoURL);
-                    } catch (e) {
-                        l(e);
-                        await bot.sendMessage(from, { text: "❌ Failed to load episode details." }, { quoted: m });
-                        return;
+                        downloadData = (await axios.get(downloadUrl, { 'timeout': 10000 })).data;
+                        if (!downloadData.status) throw new Error();
+                        break;
+                    } catch {
+                        if (!retries) {
+                            await bot.sendMessage(from, { 'text': '❌ Error: Failed to retrieve data' }, { 'quoted': incomingMessage });
+                            return;
+                        }
+                        await new Promise(resolve => setTimeout(resolve, 1000));
                     }
-                    
-                    const episodeData = episodeInfo.data?.data || {};
+                }
 
-                    // Prepare download links for the episode
-                    let newQList = (episodeData.download_links || []).map((x, i) => ({
-                        n: i + 1,
-                        quality: x.quality,
-                        size: x.size,
-                        link: x.link,
-                        is_download: true
+                let downloadLinks = [];
+                let thumbnailUrl = selectedFilm.image;
+                
+                if (isTvEpisode) {
+                    downloadLinks = downloadData.data.filter(link => 
+                        link.finalDownloadUrl && 
+                        (link.host === 'DLServer-01' || link.host === 'DLServer-02' || link.host === 'Usersdrive')
+                    ).map(link => ({
+                        'quality': link.quality,
+                        'size': 'N/A',
+                        'link': link.finalDownloadUrl
                     }));
-                    
-                    if (newQList.length > 0) {
-                        // Send new quality selection message for the episode
-                        let newQTxt = `*📥 Choose Quality for: ${chosen.title}*\n\n`;
-                        for (const q of newQList) newQTxt += `${q.n} ❱❱ **${q.quality}** ➛ _${q.size}_\n`;
-                        newQTxt += "\n⭐❰ASITHA MOVIE❱⭐";
-                        
-                        const newQMsg = await bot.sendMessage(from, {
-                            caption: newQTxt,
-                        }, { quoted: m });
-                        
-                        // Update state with new qList for the episode
-                        state.set(newQMsg.key.id, { 
-                            qList: newQList, 
-                            pick: { ...pick, title: `${pick.title} - ${chosen.title}` }, // Update title for filename
-                            mediaType: 'download', 
-                            lastSelectedLink: chosen.link
-                        });
-                        
-                        // Delete the old state (TV Show/Season state)
-                        state.delete(quotedId);
+                } else {
+                    downloadLinks = downloadData.data.downloadLinks;
+                    thumbnailUrl = downloadData.data.images?.[0] || selectedFilm.image; 
+                }
 
-                    } else {
-                        await bot.sendMessage(from, { text: `❌ No download links found for episode: ${chosen.title}` }, { quoted: m });
+                const picks = [];
+                const availableQualities = {};
+
+                for (let i = 0; i < downloadLinks.length; i++) {
+                    const link = downloadLinks[i];
+                    const quality = link.quality;
+                    const size = link.size || 'N/A';
+                    const directLink = link.link;
+
+                    if (directLink) {
+                        const qKey = quality.toUpperCase().replace(/\s/g, '');
+                        let priority = 0;
+
+                        if (qKey.includes('1080P') || qKey.includes('FHD')) priority = 3;
+                        else if (qKey.includes('720P') || qKey.includes('HD')) priority = 2;
+                        else if (qKey.includes('480P') || qKey.includes('SD')) priority = 1;
+
+                        if (!availableQualities[qKey] || availableQualities[qKey].priority < priority) {
+                            availableQualities[qKey] = { quality, size, direct_download: directLink, priority };
+                        }
                     }
+                }
+
+                const sortedPicks = Object.values(availableQualities)
+                    .sort((a, b) => b.priority - a.priority)
+                    .slice(0, 5);
+
+                for (let i = 0; i < sortedPicks.length; i++) {
+                    picks.push({ 'n': i + 1, ...sortedPicks[i] });
+                }
+
+                if (!picks.length) {
+                    await bot.sendMessage(from, { 'text': '❌ No usable download links found.' }, { 'quoted': incomingMessage });
                     return;
                 }
 
-                // --- If the selection is a direct download link (Movie or Episode Quality) ---
-                if (chosen.is_download) {
-                    // Remove the state entry after selection to prevent multiple downloads
-                    state.delete(quotedId);
-
-                    await bot.sendMessage(from, { react: { text: "⏳", key: m.key } });
-
-                    let downloadUrl = chosen.link;
-
-                    try {
-                        // Use the download API to get the final direct link
-                        const finalDownloadInfo = await axios.get(
-                            `${DOWNLOAD_API}url=${encodeURIComponent(downloadUrl)}&apiKey=${API_KEY}`
-                        );
-                        
-                        const finalLink = finalDownloadInfo.data?.data?.downloadUrl;
-                        
-                        if (!finalLink) throw new Error("Could not retrieve final download URL.");
-                        
-                        // Send the direct download link
-                        await bot.sendMessage(from, {
-                            text: `*✅ Download Link Ready!*\n\nTitle: ${pick.title}\nQuality: ${chosen.quality}\n\n*🔗 Direct Download:* ${finalLink}`
-                        }, { quoted: m });
-
-                        await bot.sendMessage(from, { react: { text: "✅", key: m.key } });
-
-                    } catch (error) {
-                        l(error);
-                        await bot.sendMessage(from, { text: "❌ Failed to generate the final download link. Please try again." }, { quoted: m });
-                        await bot.sendMessage(from, { react: { text: "❌", key: m.key } });
-                    }
+                let qualityReply = `*🎬 ${selectedFilm.title}*\n\n📥 Choose Quality:\n\n`;
+                for (const pick of picks) {
+                    qualityReply += `${pick.n}. *${pick.quality}* • ${pick.size})\n`;
                 }
+                qualityReply += '\n*~https://whatsapp.com/channel/0029Vb5xFPHGE56jTnm4ZD2k~*';
+
+                const qualityMessage = await bot.sendMessage(from, {
+                    'image': { 'url': thumbnailUrl },
+                    'caption': qualityReply
+                }, { 'quoted': incomingMessage });
+
+                stateMap.set(qualityMessage.key.id, { 'film': selectedFilm, 'picks': picks });
+                return;
             }
-        };
 
-        bot.ev.on("messages.upsert", handler);
+            if (stateMap.has(quotedId)) {
+                const { film, picks } = stateMap.get(quotedId);
+                const selectedQuality = picks.find(item => item.n === parseInt(text));
 
-    } catch (e) {
-        await bot.sendMessage(from, { text: "❌ Error: " + e.message }, { quoted: msg });
-    }
-});
+                if (!selectedQuality) {
+                    await bot.sendMessage(from, { 'text': '❌ Wrong quality.' }, { 'quoted': incomingMessage });
+                    return;
+                }
+
+                const sizeLower = selectedQuality.size ? selectedQuality.size.toLowerCase() : '0mb';
+                let sizeInGB = 3; 
+                if (sizeLower.includes('gb')) sizeInGB = parseFloat(sizeLower) || 3;
+                else if (sizeLower.includes('mb')) sizeInGB = (parseFloat(sizeLower) || 0
