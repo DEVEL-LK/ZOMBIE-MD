@@ -1,5 +1,5 @@
 /*
- * Cinesubz Bot Command – FULL DETAIL + 100% REPLY BASED
+ * Cinesubz Bot Command – FULL DETAIL + 100% REPLY BASED + ERROR FIXED
  */
 
 const l = console.log;
@@ -20,8 +20,11 @@ const DOWNLOAD_API = `${API_BASE}/downloadurl?`;
 
 const cache = new NodeCache({ stdTTL: 600 }); // Cache for 10 minutes
 
-// Helper function to extract type (movie or tvshow)
+// Helper function to extract type (movie or tvshow) - **ERROR FIX INCLUDED**
 function getMediaType(url) {
+    // URL එකක් string එකක් බවට සහතික කිරීම
+    if (typeof url !== 'string' || !url) return 'movie'; 
+    
     if (url.includes("/episodes/")) return 'episode';
     if (url.includes("/tvshows/")) return 'tvshow';
     return 'movie';
@@ -57,8 +60,8 @@ cmd({
                 n: i + 1,
                 title: it.Title,
                 link: it.Link,
-                image: it.Image || it.image, // Ensure compatibility
-                type: getMediaType(it.Link)
+                image: it.Image || it.image,
+                type: getMediaType(it.Link) // Link is checked for safety here
             }));
 
             cache.set(key, data);
@@ -120,9 +123,9 @@ cmd({
                 if (apiData.year) details += `📅 **RELEASE Date** ➛ ${apiData.year}\n`;
                 if (apiData.country) details += `🌍 **COUNTRY** ➛ _${apiData.country}_\n`;
                 if (apiData.duration) details += `⏱️ **DURATION** ➛ _${apiData.duration}_\n`;
-                if (apiData.genre) details += `🎦 **GENRES** ➛ _${apiData.genre.join(', ')}_\n`;
-                if (apiData.director) details += `🤵 **DIRECTOR** ➛ ${apiData.director.join(', ')}\n`;
-                if (apiData.cast) details += `👥 **CAST** ➛ ${apiData.cast.join(', ')}\n`;
+                if (apiData.genre && apiData.genre.length) details += `🎦 **GENRES** ➛ _${apiData.genre.join(', ')}_\n`;
+                if (apiData.director && apiData.director.length) details += `🤵 **DIRECTOR** ➛ ${apiData.director.join(', ')}\n`;
+                if (apiData.cast && apiData.cast.length) details += `👥 **CAST** ➛ ${apiData.cast.join(', ')}\n`;
                 if (apiData.plot) details += `\n📝 *Plot:* ${apiData.plot}\n`;
                 
                 // --- Prepare Quality/Episode List ---
@@ -131,32 +134,29 @@ cmd({
 
                 if (mediaType === 'tvshow') {
                     qTxtTitle = '*📥 Choose Season/Episode (Reply below number)*';
-                    // qList = apiData.episodes structure: { link, title }
-                    qList = apiData.episodes.map((x, i) => ({
+                    qList = (apiData.episodes || []).map((x, i) => ({
                         n: i + 1,
                         title: x.title,
                         link: x.link,
-                        is_episode: true // Flag to indicate need for next step (episode-details)
+                        is_episode: true
                     }));
                 } else if (mediaType === 'episode') {
                     qTxtTitle = '*📥 Choose Download Quality (Reply below number)*';
-                    // qList = apiData.download_links structure: { quality, size, link }
-                    qList = apiData.download_links.map((x, i) => ({
+                    qList = (apiData.download_links || []).map((x, i) => ({
                         n: i + 1,
                         quality: x.quality,
                         size: x.size,
                         link: x.link,
-                        is_download: true // Flag to indicate direct download link
+                        is_download: true
                     }));
                 } else { // movie
                     qTxtTitle = '*📥 Choose Download Quality (Reply below number)*';
-                    // qList = apiData.download_links structure: { quality, size, link }
-                    qList = apiData.download_links.map((x, i) => ({
+                    qList = (apiData.download_links || []).map((x, i) => ({
                         n: i + 1,
                         quality: x.quality,
                         size: x.size,
                         link: x.link,
-                        is_download: true // Flag to indicate direct download link
+                        is_download: true
                     }));
                 }
                 
@@ -226,7 +226,7 @@ cmd({
                         n: i + 1,
                         quality: x.quality,
                         size: x.size,
-                        link: x.link, // This is the final download link
+                        link: x.link,
                         is_download: true
                     }));
                     
@@ -244,7 +244,7 @@ cmd({
                         state.set(newQMsg.key.id, { 
                             qList: newQList, 
                             pick: { ...pick, title: `${pick.title} - ${chosen.title}` }, // Update title for filename
-                            mediaType: 'download', // Flag as ready for direct download
+                            mediaType: 'download', 
                             lastSelectedLink: chosen.link
                         });
                         
@@ -264,17 +264,14 @@ cmd({
 
                     await bot.sendMessage(from, { react: { text: "⏳", key: m.key } });
 
-                    let downloadUrl = '';
-                    if (chosen.link.startsWith('http')) {
-                        // If link is already a full URL (Cinesubz download link structure)
-                        downloadUrl = chosen.link;
-                    } else {
-                        // If link is part of the API response that needs download API call (unlikely for cinesubz final links, but as a fallback)
-                        downloadUrl = `${DOWNLOAD_API}url=${encodeURIComponent(chosen.link)}&apiKey=${API_KEY}`;
-                    }
+                    let downloadUrl = chosen.link;
 
                     try {
-                        const finalDownloadInfo = await axios.get(downloadUrl);
+                        // Use the download API to get the final direct link
+                        const finalDownloadInfo = await axios.get(
+                            `${DOWNLOAD_API}url=${encodeURIComponent(downloadUrl)}&apiKey=${API_KEY}`
+                        );
+                        
                         const finalLink = finalDownloadInfo.data?.data?.downloadUrl;
                         
                         if (!finalLink) throw new Error("Could not retrieve final download URL.");
