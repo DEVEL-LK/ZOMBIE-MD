@@ -2,9 +2,9 @@
  * Cinesubz Bot – FULL DETAIL + ERROR FIXED + TV/Movie Support
  */
 
-const l = console.log;
 const axios = require('axios');
 const NodeCache = require('node-cache');
+const bot = require('your-bot-library');  // Bot framework එකට අනුව
 
 const API_KEY = '25f974dba76310042bcd3c9488eec9093816ef32eb36d34c1b6b875ac9215932';
 const SEARCH_API = 'https://foreign-marna-sithaunarathnapromax-9a005c2e.koyeb.app/api/cinesubz/search?q=';
@@ -13,22 +13,33 @@ const TV_DL_API = 'https://foreign-marna-sithaunarathnapromax-9a005c2e.koyeb.app
 const EPISODE_DL_API = 'https://foreign-marna-sithaunarathnapromax-9a005c2e.koyeb.app/api/cinesubz/episode-details?url=';
 const cache = new NodeCache({ stdTTL: 60 });
 
+// cmd function definition for command handling
+function cmd(options, callback) {
+    bot.on('message', (message) => {
+        if (message.text.startsWith(options.pattern)) {
+            callback(bot, message);  // Call the provided callback function when the command pattern matches
+        }
+    });
+}
+
+// Command setup for .cinesubz
 cmd({
-    pattern: 'cinesubz',
+    pattern: '.cinesubz',
     react: '🎥',
-    desc: 'Download Sinhala Sub Movies/TV Shows',
-    category: 'download',
-    filename: __filename
-}, async (bot, msg, ctx, { from, q }) => {
+    desc: 'Search Sinhala Subtitles for Movies/TV Shows',
+    category: 'download'
+}, async (bot, msg) => {
+
+    const q = msg.text.slice(10).trim();  // Get the query after the command, e.g., '.cinesubz Avatar'
+    const from = msg.from;
 
     if (!q) {
-        await bot.sendMessage(from, {
-            text: "Usage:\n.cinesubz Avatar\n.cinesubz Breaking Bad"
-        }, { quoted: msg });
+        await bot.sendMessage(from, { text: "Usage: .cinesubz Avatar\n.cinesubz Breaking Bad" });
         return;
     }
 
     try {
+        // Cache for search results
         const key = "search_" + q.toLowerCase();
         let data = cache.get(key);
 
@@ -51,7 +62,7 @@ cmd({
 
         let txt = "*🎬 SEARCH RESULTS*\n\n";
         for (const r of data) txt += `${r.n}. ${r.title}\n`;
-        txt += "\nReply with Number";
+        txt += "\nReply with the Number of your choice.";
 
         const searchMsg = await bot.sendMessage(from, {
             image: { url: data[0].image },
@@ -75,8 +86,7 @@ cmd({
                 }
 
                 const isTV = pick.link.includes("/episodes/");
-                const infoURL = (isTV ? TV_DL_API : MOVIE_DL_API) + 
-                                `url=${encodeURIComponent(pick.link)}&apiKey=${API_KEY}`;
+                const infoURL = (isTV ? TV_DL_API : MOVIE_DL_API) + `url=${encodeURIComponent(pick.link)}&apiKey=${API_KEY}`;
 
                 let info;
                 try {
@@ -88,7 +98,6 @@ cmd({
                 }
 
                 const apiData = info.data || {};
-
                 const full = {
                     title: apiData.title || pick.title,
                     imdb: apiData.imdb || apiData.rating || "N/A",
@@ -99,7 +108,6 @@ cmd({
                 };
 
                 let details = `*🎬 ${full.title}*\n\n`;
-
                 if (full.imdb !== "N/A") details += `⭐ IMDb: ${full.imdb}\n`;
                 if (full.year !== "N/A") details += `📅 Year: ${full.year}\n`;
                 if (full.genre !== "N/A") details += `🎭 Genre: ${full.genre}\n`;
@@ -112,7 +120,6 @@ cmd({
 
                 // Prepare quality links
                 let links = [];
-
                 if (isTV) {
                     links = apiData.episodes || [];
                 } else {
