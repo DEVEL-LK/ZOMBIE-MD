@@ -1,5 +1,6 @@
 /*
- * SinhalaSub Bot – FULL DETAIL + ERROR FIXED + TV/Movie Support
+ * SinhalaSub Bot – FULL PREMIUM COMMAND
+ * Search 20 Results → Next Page → Full OMDb Details → Quality Select → Download
  */
 
 const l = console.log;
@@ -21,10 +22,20 @@ function fixPixelDrain(url) {
     return `https://pixeldrain.com/api/file/${id}?download`;
 }
 
+// Auto-clean title for OMDb search
+function cleanTitle(title) {
+    let t = title.replace(/Sinhala Subtitles|සිංහල උපසිරසි/gi, '');
+    t = t.replace(/\([0-9]{4}\)/g, match => match); // Keep year
+    t = t.replace(/S[0-9]{1,2}E[0-9]{1,2}/gi, ''); // Remove episode numbers
+    t = t.replace(/[^a-zA-Z0-9\s]/g, ''); // Remove symbols
+    t = t.replace(/\s+/g, ' ').trim();
+    return t;
+}
+
 cmd({
     pattern: 'sinhalasub',
     react: '🎬',
-    desc: 'Download Sinhala Sub Movies',
+    desc: 'Download Sinhala Sub Movies with FULL DETAILS',
     category: 'download',
     filename: __filename
 }, async (bot, msg, ctx, { from, q }) => {
@@ -37,32 +48,38 @@ cmd({
     }
 
     try {
-        const key = "search_" + q.toLowerCase();
-        let data = cache.get(key);
+        const pageSize = 20;
+        const key = `search_${q.toLowerCase()}`;
+        let data = cache.get(key) || { results: [], page: 1 };
 
-        if (!data) {
+        // Fetch if cache empty or new search
+        if (!data.results.length) {
             const url = `${SEARCH_API}q=${encodeURIComponent(q)}&apiKey=${API_KEY}`;
             const api = await axios.get(url);
             const list = api.data?.data || [];
-
             if (!list.length) throw new Error("❌ No results found.");
 
-            data = list.map((it, i) => ({
+            data.results = list.map((it, i) => ({
                 n: i + 1,
                 title: it.Title || it.title,
                 link: it.Link || it.link,
                 image: it.Img || it.image
             }));
-
             cache.set(key, data);
         }
 
-        let txt = "*🎬 SEARCH RESULTS*\n\n";
-        for (const r of data) txt += `${r.n}. ${r.title}\n`;
-        txt += "\nReply with Number";
+        const currentPage = data.page;
+        const start = (currentPage - 1) * pageSize;
+        const end = start + pageSize;
+        const pageResults = data.results.slice(start, end);
+
+        let txt = `*🎬 SEARCH RESULTS (Page ${currentPage})*\n\n`;
+        pageResults.forEach(r => txt += `${r.n}. ${r.title}\n`);
+        if (data.results.length > end) txt += `\nReply 21 → Next Page`;
+        txt += "\n\nReply with Number";
 
         const searchMsg = await bot.sendMessage(from, {
-            image: { url: data[0].image },
+            image: { url: pageResults[0].image },
             caption: txt
         }, { quoted: msg });
 
@@ -74,9 +91,19 @@ cmd({
             const quotedId = m?.message?.extendedTextMessage?.contextInfo?.stanzaId;
             if (!text || !quotedId) return;
 
+            // Next Page
+            if (text === "21" && quotedId === searchMsg.key.id) {
+                data.page += 1;
+                cache.set(key, data);
+                await bot.sendMessage(from, { text: `📄 Loading Page ${data.page}...` }, { quoted: m });
+                bot.ev.off("messages.upsert", handler);
+                cmd({ pattern: 'sinhalasub', react: '🎬', desc: '', category: '', filename: __filename }, async (bot2, msg2, ctx2, { from: from2, q: q2 }) => {}); // Re-run command
+                return;
+            }
+
             // ----- SELECT MOVIE -----
             if (quotedId === searchMsg.key.id) {
-                const pick = data.find(x => x.n === parseInt(text));
+                const pick = data.results.find(x => x.n === parseInt(text));
                 if (!pick) {
                     await bot.sendMessage(from, { text: "❌ Invalid number." }, { quoted: m });
                     return;
@@ -95,23 +122,35 @@ cmd({
                     return;
                 }
 
-                const apiData = info.data || {};
+                const cleanSearch = cleanTitle(pick.title);
+                let omdbData = {};
+                try {
+                    const omdbResp = await axios.get(`https://omdbapi.b-cdn.net/?t=${encodeURIComponent(cleanSearch)}`);
+                    omdbData = omdbResp.data || {};
+                } catch {}
 
                 const full = {
-                    title: apiData.title || pick.title,
-                    imdb: apiData.imdb || apiData.rating || "N/A",
-                    year: apiData.year || apiData.releaseYear || "N/A",
-                    genre: apiData.genre || apiData.genres || "N/A",
-                    plot: apiData.plot || apiData.description || apiData.story || "N/A",
-                    image: apiData.image || pick.image
+                    title: omdbData.Title || pick.title,
+                    imdb: omdbData.imdbRating || "N/A",
+                    year: omdbData.Year || "N/A",
+                    genre: omdbData.Genre || "N/A",
+                    plot: omdbData.Plot || "N/A",
+                    actors: omdbData.Actors || "N/A",
+                    director: omdbData.Director || "N/A",
+                    country: omdbData.Country || "N/A",
+                    language: omdbData.Language || "N/A",
+                    image: omdbData.Poster || pick.image
                 };
 
                 let details = `*🎬 ${full.title}*\n\n`;
-
-                if (full.imdb !== "N/A") details += `⭐ IMDb: ${full.imdb}\n`;
-                if (full.year !== "N/A") details += `📅 Year: ${full.year}\n`;
-                if (full.genre !== "N/A") details += `🎭 Genre: ${full.genre}\n`;
-                if (full.plot !== "N/A")  details += `\n📝 *Plot:* ${full.plot}\n`;
+                details += full.imdb !== "N/A" ? `⭐ IMDb: ${full.imdb}\n` : '';
+                details += full.year !== "N/A" ? `📅 Year: ${full.year}\n` : '';
+                details += full.genre !== "N/A" ? `🎭 Genre: ${full.genre}\n` : '';
+                details += full.actors !== "N/A" ? `👩‍💼 Actors: ${full.actors}\n` : '';
+                details += full.director !== "N/A" ? `🎬 Director: ${full.director}\n` : '';
+                details += full.country !== "N/A" ? `🌍 Country: ${full.country}\n` : '';
+                details += full.language !== "N/A" ? `🗣️ Language: ${full.language}\n` : '';
+                details += full.plot !== "N/A" ? `\n📝 *Plot:* ${full.plot}\n` : '';
 
                 const infoMsg = await bot.sendMessage(from, {
                     image: { url: full.image },
@@ -120,11 +159,10 @@ cmd({
 
                 // Prepare quality links
                 let links = [];
-
                 if (isTV) {
-                    links = apiData.episodes || [];
+                    links = info.data?.episodes || [];
                 } else {
-                    links = apiData.downloadLinks || [];
+                    links = info.data?.downloadLinks || [];
                 }
 
                 const qList = links.map((x, i) => ({
@@ -150,7 +188,6 @@ cmd({
             // ----- QUALITY SELECT -----
             if (state.has(quotedId)) {
                 const { qList, pick } = state.get(quotedId);
-
                 const chosen = qList.find(x => x.n === parseInt(text));
                 if (!chosen) {
                     await bot.sendMessage(from, { text: "❌ Wrong Quality." }, { quoted: m });
