@@ -1,9 +1,5 @@
-/*
- * NOTE: Original variable/function names preserved
- */
-
 const l = console.log;
-const config = require('../config'); 
+const config = require('../config');
 const { cmd } = require('../command');
 const axios = require('axios');
 const NodeCache = require('node-cache');
@@ -12,6 +8,8 @@ const API_KEY = '25f974dba76310042bcd3c9488eec9093816ef32eb36d34c1b6b875ac921593
 const SEARCH_API = 'https://foreign-marna-sithaunarathnapromax-9a005c2e.koyeb.app/api/cinesubz/search?q=';
 const MOVIE_DL_API = 'https://foreign-marna-sithaunarathnapromax-9a005c2e.koyeb.app/api/cinesubz/movie-details?url=';
 const TV_DL_API = 'https://foreign-marna-sithaunarathnapromax-9a005c2e.koyeb.app/api/cinesubz/tvshow-details?url=';
+const EPISODE_DL_API = 'https://foreign-marna-sithaunarathnapromax-9a005c2e.koyeb.app/api/cinesubz/episode-details?url=';
+const DOWNLOAD_API = 'https://foreign-marna-sithaunarathnapromax-9a005c2e.koyeb.app/api/cinesubz/downloadurl?url=';
 
 const searchCache = new NodeCache({ 'stdTTL': 60, 'checkperiod': 120 });
 const BRAND = config.MOVIE_FOOTER;
@@ -26,16 +24,16 @@ function fixPixelDrain(url) {
 }
 
 cmd({
-    'pattern': 'cinesubz',
+    'pattern': 'sinhalasub',
     'react': '🎬',
-    'desc': 'Search and download Movies/TV Series from Cinesubz',
+    'desc': 'Search and download Movies/TV Series',
     'category': 'download',
     'filename': __filename
 }, async (bot, message, context, { from, q: searchQuery }) => {
 
     if (!searchQuery) {
         await bot.sendMessage(from, {
-            'text': '*💡 Type Your Movie ㋡*\n\n📋 Usage: .cinesubz <search term>\n📝 Example: .cinesubz Breaking Bad\n\n' + '*🎬 Movie / TV Series Search*'
+            'text': '*💡 Type Your Movie ㋡*\n\n📋 Usage: .sinhalasub <search term>\n📝 Example: .sinhalasub Breaking Bad\n\n' + '*🎬 Movie / TV Series Search*'
         }, { 'quoted': message });
         return;
     }
@@ -191,20 +189,4 @@ cmd({
                     'caption': qualityReply
                 }, { 'quoted': incomingMessage });
 
-                stateMap.set(qualityMessage.key.id, { 'film': selectedFilm, 'picks': picks });
-                return;
-            }
-
-            if (stateMap.has(quotedId)) {
-                const { film, picks } = stateMap.get(quotedId);
-                const selectedQuality = picks.find(item => item.n === parseInt(text));
-
-                if (!selectedQuality) {
-                    await bot.sendMessage(from, { 'text': '❌ Wrong quality.' }, { 'quoted': incomingMessage });
-                    return;
-                }
-
-                const sizeLower = selectedQuality.size ? selectedQuality.size.toLowerCase() : '0mb';
-                let sizeInGB = 3; 
-                if (sizeLower.includes('gb')) sizeInGB = parseFloat(sizeLower) || 3;
-                else if (sizeLower.includes('mb')) sizeInGB = (parseFloat(sizeLower) || 0
+                stateMap.set(qualityMessage.key.id, { 'film': selectedFilm, 'picks': picks
