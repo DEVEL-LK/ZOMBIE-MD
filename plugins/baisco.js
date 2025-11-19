@@ -74,7 +74,7 @@ cmd({
             const quotedId = m?.message?.extendedTextMessage?.contextInfo?.stanzaId;
             if (!text || !quotedId) return;
 
-            // ----- SELECT MOVIE -----
+            // ----- SELECT MOVIE (Updated for Full Details) -----
             if (quotedId === searchMsg.key.id) {
                 const pick = data.find(x => x.n === parseInt(text));
                 if (!pick) {
@@ -90,64 +90,69 @@ cmd({
                 try {
                     info = await axios.get(infoURL);
                     info = info.data;
-                } catch {
+                } catch (e) {
+                    l(e)
                     await bot.sendMessage(from, { text: "❌ Failed to load movie info." }, { quoted: m });
                     return;
                 }
 
                 const apiData = info.data || {};
 
+                // Extract all relevant details from API
                 const full = {
                     title: apiData.title || pick.title,
                     imdb: apiData.imdb || apiData.rating || "N/A",
                     year: apiData.year || apiData.releaseYear || "N/A",
+                    country: apiData.country || "India", // Defaulting to India as in the image
+                    duration: apiData.duration || "N/A",
                     genre: apiData.genre || apiData.genres || "N/A",
+                    director: apiData.director || "N/A",
+                    cast: apiData.cast ? apiData.cast.join(', ') : "N/A",
                     plot: apiData.plot || apiData.description || apiData.story || "N/A",
-                    image: apiData.image || pick.image
+                    image: apiData.image || pick.image,
+                    downloadLinks: isTV ? apiData.episodes : apiData.downloadLinks
                 };
 
-                let details = `*🎬 ${full.title}*\n\n`;
+                // Format the main detail message like in the image
+                let details = `*🍀 TITLE ➛ ${full.title}*\n\n`;
 
-                if (full.imdb !== "N/A") details += `⭐ IMDb: ${full.imdb}\n`;
-                if (full.year !== "N/A") details += `📅 Year: ${full.year}\n`;
-                if (full.genre !== "N/A") details += `🎭 Genre: ${full.genre}\n`;
-                if (full.plot !== "N/A")  details += `\n📝 *Plot:* ${full.plot}\n`;
+                details += `📅 **RELEASE Date** ➛ ${full.year}\n`;
+                details += `🌍 **COUNTRY** ➛ _${full.country}_\n`;
+                if (full.duration !== "N/A") details += `⏱️ **DURATION** ➛ _${full.duration}_\n`;
+                if (full.genre !== "N/A") details += `🎦 **GENRES** ➛ _${full.genre}_\n`;
+                if (full.director !== "N/A") details += `🤵 **DIRECTOR** ➛ ${full.director}\n`;
+                if (full.cast !== "N/A") details += `👥 **CAST** ➛ ${full.cast}\n`;
 
-                const infoMsg = await bot.sendMessage(from, {
-                    image: { url: full.image },
-                    caption: details
-                }, { quoted: m });
+                details += "\n--- *Download Details* ---\n";
 
-                // Prepare quality links
-                let links = [];
-
-                if (isTV) {
-                    links = apiData.episodes || [];
-                } else {
-                    links = apiData.downloadLinks || [];
-                }
-
-                const qList = links.map((x, i) => ({
+                const qList = (full.downloadLinks || []).map((x, i) => ({
                     n: i + 1,
-                    quality: x.quality || x.q,
+                    quality: x.quality || x.q || (isTV ? `E${x.episode}` : "Quality"),
                     size: x.size || "Unknown",
                     link: x.finalDownloadUrl || x.link,
                     episode: x.episode
                 }));
 
-                let qTxt = "*📥 Choose Quality*\n\n";
-                for (const q of qList) qTxt += `${q.n}. ${q.quality} • ${q.size}\n`;
+                if (qList.length > 0) {
+                    for (const q of qList) details += `${q.n} ❱❱ **${q.quality}** ➛ _${q.size}_\n`;
+                    details += "\n*Reply below number to Download*";
+                } else {
+                    details += "❌ No download links found.";
+                }
 
-                const qMsg = await bot.sendMessage(from, {
-                    caption: qTxt,
-                    image: { url: full.image }
-                });
+                const detailMsg = await bot.sendMessage(from, {
+                    image: { url: full.image },
+                    caption: details
+                }, { quoted: m });
 
-                state.set(qMsg.key.id, { qList, pick, isTV });
+                if (qList.length > 0) {
+                     // Save state for quality selection
+                    state.set(detailMsg.key.id, { qList, pick, isTV });
+                }
                 return;
             }
 
-            // ----- QUALITY SELECT -----
+            // ----- QUALITY SELECT (Now replies to the Detail Msg) -----
             if (state.has(quotedId)) {
                 const { qList, pick } = state.get(quotedId);
 
@@ -156,20 +161,30 @@ cmd({
                     await bot.sendMessage(from, { text: "❌ Wrong Quality." }, { quoted: m });
                     return;
                 }
+                
+                // Remove the state entry after selection to prevent multiple downloads
+                state.delete(quotedId);
 
-                const buffer = await axios.get(
-                    fixPixelDrain(chosen.link),
-                    { responseType: "arraybuffer" }
-                ).then(r => r.data);
+                await bot.sendMessage(from, { react: { text: "⏳", key: m.key } });
 
-                await bot.sendMessage(from, {
-                    document: buffer,
-                    mimetype: "video/mp4",
-                    fileName: `${pick.title} - ${chosen.quality}.mp4`,
-                    caption: `🎬 ${pick.title}\n📥 ${chosen.quality}`
-                }, { quoted: m });
+                try {
+                    const buffer = await axios.get(
+                        fixPixelDrain(chosen.link),
+                        { responseType: "arraybuffer" }
+                    ).then(r => r.data);
 
-                await bot.sendMessage(from, { react: { text: "✅", key: m.key } });
+                    await bot.sendMessage(from, {
+                        document: buffer,
+                        mimetype: "video/mp4",
+                        fileName: `${pick.title} - ${chosen.quality}.mp4`,
+                        caption: `🎬 ${pick.title}\n📥 ${chosen.quality}`
+                    }, { quoted: m });
+
+                    await bot.sendMessage(from, { react: { text: "✅", key: m.key } });
+                } catch (error) {
+                    await bot.sendMessage(from, { text: "❌ Failed to download file. Please try another quality or check the link." }, { quoted: m });
+                    await bot.sendMessage(from, { react: { text: "❌", key: m.key } });
+                }
             }
         };
 
