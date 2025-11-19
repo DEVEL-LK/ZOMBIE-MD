@@ -74,7 +74,7 @@ cmd({
             const quotedId = m?.message?.extendedTextMessage?.contextInfo?.stanzaId;
             if (!text || !quotedId) return;
 
-            // ----- SELECT MOVIE (Updated for Full Details) -----
+            // ----- SELECT MOVIE (Send Details) -----
             if (quotedId === searchMsg.key.id) {
                 const pick = data.find(x => x.n === parseInt(text));
                 if (!pick) {
@@ -98,7 +98,7 @@ cmd({
 
                 const apiData = info.data || {};
 
-                // Extract all relevant details from API
+                // Extract all relevant details
                 const full = {
                     title: apiData.title || pick.title,
                     imdb: apiData.imdb || apiData.rating || "N/A",
@@ -113,7 +113,7 @@ cmd({
                     downloadLinks: isTV ? apiData.episodes : apiData.downloadLinks
                 };
 
-                // Format the main detail message like in the image
+                // 1. Format and send the main detail message
                 let details = `*🍀 TITLE ➛ ${full.title}*\n\n`;
 
                 details += `📅 **RELEASE Date** ➛ ${full.year}\n`;
@@ -122,9 +122,16 @@ cmd({
                 if (full.genre !== "N/A") details += `🎦 **GENRES** ➛ _${full.genre}_\n`;
                 if (full.director !== "N/A") details += `🤵 **DIRECTOR** ➛ ${full.director}\n`;
                 if (full.cast !== "N/A") details += `👥 **CAST** ➛ ${full.cast}\n`;
+                
+                // Add a note about the next step
+                details += "\n--- *Next, choose the quality in the message below.* ---";
 
-                details += "\n--- *Download Details* ---\n";
-
+                await bot.sendMessage(from, {
+                    image: { url: full.image },
+                    caption: details
+                }, { quoted: m });
+                
+                // Prepare quality links for the next message
                 const qList = (full.downloadLinks || []).map((x, i) => ({
                     n: i + 1,
                     quality: x.quality || x.q || (isTV ? `E${x.episode}` : "Quality"),
@@ -134,25 +141,25 @@ cmd({
                 }));
 
                 if (qList.length > 0) {
-                    for (const q of qList) details += `${q.n} ❱❱ **${q.quality}** ➛ _${q.size}_\n`;
-                    details += "\n*Reply below number to Download*";
+                    // 2. Format and send the quality selection message
+                    let qTxt = "*📥 Choose Quality (Reply below number)*\n\n";
+                    for (const q of qList) qTxt += `${q.n} ❱❱ **${q.quality}** ➛ _${q.size}_\n`;
+                    qTxt += "\n⭐❰ASITHA MOVIE❱⭐";
+                    
+                    const qMsg = await bot.sendMessage(from, {
+                        caption: qTxt,
+                    }, { quoted: m }); // Quoting the initial search message for context
+
+                    // Save state using the Quality Message ID
+                    state.set(qMsg.key.id, { qList, pick, isTV });
                 } else {
-                    details += "❌ No download links found.";
+                    await bot.sendMessage(from, { text: "❌ No download links found for this movie/series." }, { quoted: m });
                 }
-
-                const detailMsg = await bot.sendMessage(from, {
-                    image: { url: full.image },
-                    caption: details
-                }, { quoted: m });
-
-                if (qList.length > 0) {
-                     // Save state for quality selection
-                    state.set(detailMsg.key.id, { qList, pick, isTV });
-                }
+                
                 return;
             }
 
-            // ----- QUALITY SELECT (Now replies to the Detail Msg) -----
+            // ----- QUALITY SELECT (Now replies to the Quality Msg) -----
             if (state.has(quotedId)) {
                 const { qList, pick } = state.get(quotedId);
 
